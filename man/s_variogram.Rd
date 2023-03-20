@@ -24,9 +24,29 @@ By default \code{bins=NULL} and bins are then computed as \code{seq(0, d_max/2, 
 
 \item{n_permutation}{a non-negative integer indicating the number of permutation used to compute the 95% confidence
 level envelope under the assumption of spatial independence. By default \code{n_permutation=0}, and no envelope is generated.}
+
+\item{convert_to_utm}{a logical value, indicating if the conversion to UTM shuold be performed (\code{convert_to_utm = TRUE}) or
+the coordinate reference system of the data must be used without any conversion (\code{convert_to_utm = FALSE}).
+By default \code{convert_to_utm = TRUE}. Note: if \code{convert_to_utm = TRUE} the conversion to UTM is performed using
+the epsg provided by \code{\link{propose_utm}}.}
+
+\item{scale_to_km}{a logical value, indicating if the distances used in the variogram must be scaled
+to kilometers (\code{scale_to_km = TRUE}) or left in meters (\code{scale_to_km = FALSE}).
+By default \code{scale_to_km = FALSE}}
 }
 \value{
 an object of class 'variogram' which is a list containing the following components
+
+\code{variogram} a data-frame containing the following columns: \code{mid_points},
+the middle points of the classes of distance provided by \code{bins};
+\code{obs_vari} the values of the observed variogram; \code{obs_vari} the number of pairs.
+If \code{n_permutation > 0}, the data-frame also contains \code{lower_bound} and \code{upper_bound}
+corresponding to the lower and upper bounds of the 95% confidence intervals
+used to assess the departure of the observed variogram from the assumption of spatial independence.
+
+\code{scale_to_km} the value passed to \code{scale_to_km}
+
+\code{n_permutation} the number of permutations
 
 \code{dist_class} the classes of distances based on the provided values for \code{bins}
 

@@ -10,6 +10,7 @@
 ##'
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @importFrom sf st_transform st_coordinates
 ##' @export
 ##'
 propose_utm <- function(data) {
