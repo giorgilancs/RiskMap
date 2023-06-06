@@ -1,0 +1,22 @@
+##' @title Anopheles mosquitoes in Southern Cameroon
+##' @description These data contain 116 georeferenced locations on the counts of Anopheles gambiae and
+##' Anopheles coluzzii in Southern Cameroon.
+##' \itemize{
+##'  \item web_x x-coordinate of the spatial locations.
+##'  \item web_y y-coordinate of the spatial locations.
+##'  \item Locality: name of the place of the sampled location.
+##'  \item An.coluzzii: counts of Anopheles coluzzi.
+##'  \item An.gambiae: counts of Anopheles gambiae.
+##'  \item Total: total counts of Anopheles coluzzi and Anopheles gambiae.
+##'  \item elevation: elevation in meters of the sampled location.
+##' }
+##' The coordinate reference system is 3857.
+##' @docType data
+##' @keywords datasets
+##' @name anopheles
+##' @usage data(anopheles)
+##' @format A data frame with 116 rows and 7 variables
+##' @source Tene Fossog, B., Ayala, D., Acevedo, P., Kengne, P., Ngomo Abeso Mebuy,
+##' I., Makanga, B., et al. (2015) Habitat segregation and ecological character displacement in cryptic African malaria
+##' mosquitoes. Evolutionary Applications, 8 (4), 326-345.
+NULL

@@ -3,7 +3,7 @@
 \docType{data}
 \name{liberia}
 \alias{liberia}
-\title{Heavy metal biomonitoring in Galicia}
+\title{River-blindness in Liberia}
 \format{
 A data frame with 90 rows and 6 variables
 }
@@ -16,12 +16,12 @@ data(liberia)
 }
 \description{
 This data-set contains counts of reported onchocerciasis (or riverblindess)
-cases from 91 villages sampled across Liberia. 
+cases from 91 villages sampled across Liberia.
 The variables are as follows:
 \itemize{
  \item lat latitude of the of sampled villages.
  \item long longitude of the sampled villages.
- \item ntest number of tested people for the presence nodules. 
+ \item ntest number of tested people for the presence nodules.
  \item npos number of people that tested positive for the presence of nodules.
  \item elevation the elevation in meters of the sampled village.
  \item log_elevation the log-transformed elevation in meters of the sampled village.
