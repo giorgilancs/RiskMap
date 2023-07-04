@@ -82,7 +82,6 @@ glgm <- function(formula,
                  start_beta = NULL,
                  start_cov_pars = NULL,
                  start_vars.re = NULL,
-                 method="BFGS",
                  messages = TRUE,
                  plot_correlogram = TRUE,
                  fix_tau2 = NULL) {
@@ -121,7 +120,6 @@ glgm <- function(formula,
      family != "poisson") stop("'family' must be either 'gaussian', 'binomial'
                                or 'poisson'")
 
-  if(method != "BFGS" & method != "nlminb") stop("'method' must be either 'BFGS' or 'nlminb'.")
 
   mf <- model.frame(formula,data=data)
 
@@ -146,6 +144,7 @@ glgm <- function(formula,
                            function(j) which(re_mf[j,i]==re_unique[[names_re[i]]]))
     }
   } else {
+    n_re <- 0
     re_unique <- NULL
     ID_re <- NULL
   }
@@ -167,6 +166,7 @@ glgm <- function(formula,
   ID_coords <- sapply(1:m, function(i)
                which(coords_o[i,1]==coords[,1] &
                      coords_o[i,2]==coords[,2]))
+  s_unique <- unique(ID_coords)
 
   if(scale_to_km) {
     coords_o <- coords_o/1000
@@ -203,9 +203,9 @@ glgm <- function(formula,
     } else {
       if(geo_re=="GP") {
         if(n_re>0) {
-          start_cov_pars <- c(1, 1, quantile(dist(coords),0.25), rep(1, n_re))
+          start_cov_pars <- c(1, quantile(dist(coords),0.25), 1, rep(1, n_re))
         } else {
-          start_cov_pars <- c(1, 1, quantile(dist(coords),0.25))
+          start_cov_pars <- c(1, quantile(dist(coords), 0.25), 1)
         }
       } else {
         if(n_re>0) {
@@ -225,9 +225,9 @@ glgm <- function(formula,
       }
     } else {
       if(n_re>0) {
-        start_cov_pars <- c(1, quantile(dist(coords),0.25), 1, 1, 1, rep(1, n_re))
+        start_cov_pars <- c(1, quantile(dist(coords),0.25), 1, 1, rep(1, n_re))
       } else {
-        start_cov_pars <- c(1, quantile(dist(coords),0.25), 1, 1, 1)
+        start_cov_pars <- c(1, quantile(dist(coords),0.25), 1, 1)
       }
     }
   }
@@ -241,7 +241,7 @@ glgm <- function(formula,
 
 
   if(family=="gaussian") {
-    glgm_lm(y, D, coords, ID_coords, ID_re, re_unique,
+    glgm_lm(y, D, coords, ID_coords, ID_re, s_unique, re_unique,
             fix_tau2, method, start_beta, start_cov_pars)
   } else if(family=="binomial" | family=="poisson") {
 
@@ -253,10 +253,12 @@ glgm <- function(formula,
 
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @importFrom maxLik maxBFGS
-glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
+##' @importFrom Matrix Matrix forceSymmetric
+glgm_lm <- function(y, D, coords, ID_coords, ID_re, s_unique, re_unique,
                     fix_tau2, method, start_beta, start_cov_pars) {
 
   m <- length(y)
+  n <- nrow(coords)
   p <- ncol(D)
   U <- dist(coords)
   if(is.null(ID_re)) {
@@ -268,218 +270,252 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
 
   ID_g <- as.matrix(cbind(ID_coords, ID_re))
 
-  n.coords <- list()
-  for(i in 1:(n_re+1)) {
-    n.coords[[i]] <- as.numeric(tapply(ID_g[,i],ID_g[,i], length))
+  n_dim_re <- sapply(1:(n_re+1), function(i) length(unique(ID_g[,i])))
+  C_g <- matrix(0, nrow = m, ncol = sum(n_dim_re))
+
+  for(i in 1:m) {
+    ind_s_i <- which(s_unique==ID_g[i,1])
+    C_g[i,1:n_dim_re[1]][ind_s_i] <- 1
   }
 
+  if(n_re>0) {
+    for(j in 1:n_re) {
+      select_col <- sum(n_dim_re[1:j])
+
+      for(i in 1:m) {
+        ind_re_j_i <- which(re_unique[[j]]==ID_g[i,j+1])
+        C_g[i,select_col+1:n_dim_re[j+1]][ind_re_j_i] <- 1
+      }
+    }
+  }
+  C_g <- Matrix(C_g, sparse = TRUE)
+
+  C_g_m <- t(C_g)%*%C_g
+  C_g_m <- forceSymmetric(C_g_m)
 
   log.lik <- function(par) {
     beta <- par[1:p]
     sigma2 <- exp(par[p+1])
     phi <- exp(par[p+2])
     if(!is.null(fix_tau2)) {
-      nu2.1 <- fix_tau2/sigma2
-      nu2.2 <- exp(par[p+3])
+      nu2 <- fix_tau2/sigma2
+      omega2 <- exp(par[p+3])
       if(n_re>0) {
-        nu2_re <- exp(par[(p+3+1):(p+3+n_re)])
+        ind_sigma2_re <- (p+3+1):(p+3+n_re)
+        sigma2_re <- exp(par[ind_sigma2_re])
       }
     } else {
-      nu2.1 <- exp(par[p+3])
-      nu2.2 <- exp(par[p+4])
+      nu2 <- exp(par[p+3])
+      omega2 <- exp(par[p+4])
       if(n_re>0) {
-        nu2_re <- exp(par[(p+4+1):(p+4+n_re)])
+        ind_sigma2_re <- (p+4+1):(p+4+n_re)
+        sigma2_re <- exp(par[ind_sigma2_re])
       }
     }
 
+    R <- matern_cor(U,phi = phi, kappa=kappa,return_sym_matrix = TRUE)
+    diag(R) <- diag(R)+nu2
+
+    Sigma_g <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
+    Sigma_g_inv <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
+    Sigma_g[1:n_dim_re[1], 1:n_dim_re[1]] <- sigma2*R
+    Sigma_g_inv[1:n_dim_re[1], 1:n_dim_re[1]] <-
+    solve(R)/sigma2
+    if(n_re > 0) {
+      for(j in 1:n_re) {
+        select_col <- sum(n_dim_re[1:j])
+
+        diag(Sigma_g[select_col+1:n_dim_re[j+1], select_col+1:n_dim_re[j+1]]) <-
+          sigma2_re[j]
+
+        diag(Sigma_g_inv[select_col+1:n_dim_re[j+1], select_col+1:n_dim_re[j+1]]) <-
+        1/sigma2_re[j]
+
+      }
+    }
+
+    Sigma_g_inv <- Matrix(Sigma_g_inv, sparse = TRUE)
+    Sigma_g_inv <- forceSymmetric(Sigma_g_inv)
 
     mu <- as.numeric(D%*%beta)
     diff.y <- y-mu
-    diff.y.tilde <- list()
+    diff.y.tilde <- as.numeric(t(C_g)%*%diff.y)
+    Sigma_star <- Sigma_g_inv+C_g_m/omega2
+    Sigma_star_inv <- forceSymmetric(solve(Sigma_star))
 
-    for(i in 1:(n_re+1)) {
-      diff.y.tilde[[i]] <- as.numeric(tapply(diff.y, ID_g[,i], sum))
-    }
+    q.f.y <- as.numeric(sum(diff.y^2)/omega2)
+    q.f.y_tilde <- as.numeric(t(diff.y.tilde)%*%Sigma_star_inv%*%diff.y.tilde/
+                                (omega2^2))
+    Sigma_g_C_g_m <- Sigma_g%*%C_g_m
+    Sigma_tilde <- Sigma_g_C_g_m/omega2
+    diag(Sigma_tilde) <- diag(Sigma_tilde) + 1
+    log_det <- as.numeric(m*log(omega2)+determinant(Sigma_tilde)$modulus)
 
-    R <- matern_cor(U,phi = phi, kappa=kappa,
-                    return_sym_matrix = TRUE)
-    diag(R) <- diag(R)+nu2.1
-    R.inv <- solve(R)
-    Omega <- R.inv
-    diag(Omega) <- (diag(Omega)+n.coords[[1]]/nu2.2)
-    Omega <- Omega*(nu2.2^2)
-    Omega.inv <- solve(Omega)
-
-    q.f <- as.numeric(sum(diff.y^2)/nu2.2-
-                        t(diff.y.tilde[[1]])%*%Omega.inv%*%diff.y.tilde[[1]])
-
-    q.f_re <- 0
-    log.det_re <- 0
-    if(n_re>0) {
-      for(i in 1:n_re) {
-        o.inv_re <- ((1/nu2_re[i]+n.coords[[i+1]]/nu2.2)*(nu2.2^2))
-        q.f_re <- q.f_re - sum(diff.y.tilde[[i+1]]^2/o.inv_re)
-
-        log.det_re <- log.det_re + sum(log(1+n.coords[[i+1]]*nu2_re[i]/nu2.2))
-      }
-    }
-
-    M.det <- t(R*n.coords[[1]]/nu2.2)
-    diag(M.det) <- diag(M.det)+1
-    log.det.tot <- m*log(sigma2)+m*log(nu2.2)+
-      as.numeric(determinant(M.det)$modulus)+log.det_re
-
-    out <- -0.5*(log.det.tot+(q.f+q.f_re)/sigma2)
+    out <- -0.5*(log_det+q.f.y-q.f.y_tilde)
     return(out)
   }
 
+  D.tilde <- t(D)%*%C_g
+  U <- dist(coords)
   grad.log.lik <- function(par) {
     beta <- par[1:p]
     sigma2 <- exp(par[p+1])
     phi <- exp(par[p+2])
     if(!is.null(fix_tau2)) {
-      nu2.1 <- fix_tau2/sigma2
-      nu2.2 <- exp(par[p+3])
+      nu2 <- fix_tau2/sigma2
+      omega2 <- exp(par[p+3])
       if(n_re>0) {
-        nu2_re <- exp(par[(p+3+1):(p+3+n_re)])
+        ind_sigma2_re <- (p+3+1):(p+3+n_re)
+        ind_omega2 <- p+3
+        sigma2_re <- exp(par[ind_sigma2_re])
       }
+      g <- rep(0, p+3+n_re)
     } else {
-      nu2.1 <- exp(par[p+3])
-      nu2.2 <- exp(par[p+4])
+      nu2 <- exp(par[p+3])
+      omega2 <- exp(par[p+4])
       if(n_re>0) {
-        nu2_re <- exp(par[(p+4+1):(p+4+n_re)])
+        ind_omega2 <- p+4
+        ind_sigma2_re <- (p+4+1):(p+4+n_re)
+        sigma2_re <- exp(par[ind_sigma2_re])
+      }
+      g <- rep(0, p+4+n_re)
+    }
+
+    R <- matern_cor(U,phi = phi, kappa=kappa,return_sym_matrix = TRUE)
+    diag(R) <- diag(R)+nu2
+
+    Sigma_g <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
+    Sigma_g_inv <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
+    Sigma_g[1:n_dim_re[1], 1:n_dim_re[1]] <- sigma2*R
+    R.inv <- solve(R)
+    Sigma_g_inv[1:n_dim_re[1], 1:n_dim_re[1]] <-
+      R.inv/sigma2
+    if(n_re > 0) {
+      for(j in 1:n_re) {
+        select_col <- sum(n_dim_re[1:j])
+
+        diag(Sigma_g[select_col+1:n_dim_re[j+1], select_col+1:n_dim_re[j+1]]) <-
+          sigma2_re[j]
+
+        diag(Sigma_g_inv[select_col+1:n_dim_re[j+1], select_col+1:n_dim_re[j+1]]) <-
+          1/sigma2_re[j]
+
       }
     }
 
-    R <- matern_cor(U,phi = phi, kappa=kappa,
-                    return_sym_matrix = TRUE)
-    diag(R) <- diag(R)+nu2.1
-    R.inv <- solve(R)
-    Omega.star <- R.inv
-    diag(Omega.star) <- (diag(Omega.star)+n.coords[[1]]/nu2.2)
-    Omega.star.inv <- solve(Omega.star)
-
+    Sigma_g_inv <- Matrix(Sigma_g_inv, sparse = TRUE)
+    Sigma_g_inv <- forceSymmetric(Sigma_g_inv)
 
     mu <- as.numeric(D%*%beta)
     diff.y <- y-mu
-    q.f1 <- sum(diff.y^2)
-
-    diff.y.tilde <- list()
-    q.f2 <- list()
-    v <- list()
-    q.f <- q.f1/nu2.2
-    grad.beta <- t(D)%*%(diff.y/nu2.2)/sigma2
+    diff.y.tilde <- as.numeric(t(C_g)%*%diff.y)
+    Sigma_star <- Sigma_g_inv+C_g_m/omega2
+    Sigma_star_inv <- forceSymmetric(solve(Sigma_star))
+    M_aux <- D.tilde%*%Sigma_star_inv
 
 
+    g[1:p] <- t(D)%*%diff.y/omega2-M_aux%*%diff.y.tilde/(omega2^2)
 
-    for(i in 1:(1+n_re)) {
-      diff.y.tilde[[i]] <- as.numeric(tapply(diff.y, ID_g[,i], sum))
-      if(i==1) {
-        v[[i]] <- as.numeric(Omega.star.inv%*%diff.y.tilde[[i]])
-      } else {
-        v[[i]] <- diff.y.tilde[[i]]/(1/nu2_re[i-1]+n.coords[[i]]/nu2.2)
-      }
-      q.f2[[i]] <- as.numeric(t(diff.y.tilde[[i]])%*%v[[i]])
-      q.f <- q.f-q.f2[[i]]/(nu2.2^2)
+    der_Sigma_g_inv_sigma2 <- matrix(0, nrow = sum(n_dim_re),
+                                     ncol = sum(n_dim_re))
 
-      grad.beta <- grad.beta - as.numeric(t(D)%*%v[[i]][ID_g[,i]]/
-                                                (nu2.2^2))/sigma2
+    der_Sigma_g_inv_sigma2[1:n_dim_re[1], 1:n_dim_re[1]] <-
+      -R.inv/sigma2^2
+    der_sigma2_aux <- Sigma_star_inv%*%der_Sigma_g_inv_sigma2
+    Sigma_g_C_g_m <- Sigma_g%*%C_g_m
+    Sigma_tilde <- Sigma_g_C_g_m/omega2
+    diag(Sigma_tilde) <- diag(Sigma_tilde) + 1
+    Sigma_tilde_inv <- solve(Sigma_tilde)
+    der_sigma2_Sigma_g <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
+    der_sigma2_Sigma_g[1:n_dim_re[1], 1:n_dim_re[1]] <- R
+    der_sigma2_Sigma_g <- der_sigma2_Sigma_g%*%C_g_m/omega2
+    der_sigma2_trace <- sum(diag(Sigma_tilde_inv%*%der_sigma2_Sigma_g))
+    g[p+1] <- (-0.5*der_sigma2_trace-0.5*t(diff.y.tilde)%*%
+                      der_sigma2_aux%*%Sigma_star_inv%*%
+              diff.y.tilde/(omega2^2))*sigma2
+
+    der_Sigma_g_inv_phi <- matrix(0, nrow = sum(n_dim_re),
+                                     ncol = sum(n_dim_re))
+    M.der.phi <- matern.grad.phi(U, phi, kappa)
+    der_Sigma_g_inv_phi[1:n_dim_re[1], 1:n_dim_re[1]] <-
+      -M.der.phi*sigma2
+    der_Sigma_g_inv_phi <- Sigma_g_inv%*%der_Sigma_g_inv_phi%*%Sigma_g_inv
+    der_phi_aux <- Sigma_star_inv%*%der_Sigma_g_inv_phi
+    der_phi_Sigma_g <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
+    der_phi_Sigma_g[1:n_dim_re[1], 1:n_dim_re[1]] <- sigma2*M.der.phi
+    der_phi_Sigma_g <- der_phi_Sigma_g%*%C_g_m/omega2
+    der_phi_trace <- sum(diag(Sigma_tilde_inv%*%der_phi_Sigma_g))
+    g[p+2] <- (-0.5*der_phi_trace-0.5*t(diff.y.tilde)%*%
+                 der_phi_aux%*%Sigma_star_inv%*%
+                 diff.y.tilde/(omega2^2))*phi
+    if(is.null(fix_tau2)) {
+      der_Sigma_g_inv_nu2 <- matrix(0, nrow = sum(n_dim_re),
+                                    ncol = sum(n_dim_re))
+      diag(der_Sigma_g_inv_nu2[1:n_dim_re[1], 1:n_dim_re[1]]) <-
+        -sigma2
+      der_Sigma_g_inv_nu2 <- Sigma_g_inv%*%der_Sigma_g_inv_nu2%*%Sigma_g_inv
+      der_nu2_aux <- Sigma_star_inv%*%der_Sigma_g_inv_nu2
+      der_nu2_Sigma_g <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
+      diag(der_nu2_Sigma_g[1:n_dim_re[1], 1:n_dim_re[1]]) <- sigma2
+      der_nu2_Sigma_g <- der_nu2_Sigma_g%*%C_g_m/omega2
+      der_nu2_trace <- sum(diag(Sigma_tilde_inv%*%der_nu2_Sigma_g))
+      g[p+3] <- (-0.5*der_nu2_trace-0.5*t(diff.y.tilde)%*%
+                   der_nu2_aux%*%Sigma_star_inv%*%
+                   diff.y.tilde/(omega2^2))*nu2
     }
 
-    grad.sigma2 <- -0.5*(m-q.f/sigma2)
+    #q.f.y <- as.numeric(sum(diff.y^2)/omega2)
+    #q.f.y_tilde <- as.numeric(t(diff.y.tilde)%*%Sigma_star_inv%*%diff.y.tilde/
+    #                            (omega2^2))
+    #Sigma_tilde <- Sigma_g_C_g_m/omega2
+    #diag(Sigma_tilde) <- diag(Sigma_tilde) + 1
+    #log_det <- as.numeric(m*log(omega2)+determinant(Sigma_tilde)$modulus)
 
-    M.det <- t(R*n.coords[[1]]/nu2.2)
-    diag(M.det) <- diag(M.det)+1
-    M.det.inv <- solve(M.det)
+    #out <- -0.5*(log_det+q.f.y-q.f.y_tilde)
 
-    R1.phi <- matern.grad.phi(U,phi,kappa)*phi
-    Omega.star.R.inv <- Omega.star.inv%*%R.inv
-    der.Omega.star.inv.phi <- Omega.star.R.inv%*%R1.phi%*%t(Omega.star.R.inv)
-    der.M.phi <- t(R1.phi*n.coords[[1]]/nu2.2)
-    M1.trace.phi <- M.det.inv*t(der.M.phi)
-    trace1.phi <- sum(M1.trace.phi)
-    v.beta.phi <- as.numeric(der.Omega.star.inv.phi%*%diff.y.tilde[[1]])
-    q.f.phi <-  as.numeric(t(diff.y.tilde[[1]])%*%v.beta.phi)
-    grad.phi <- -0.5*(trace1.phi-
-                        q.f.phi/((nu2.2^2)*sigma2))
-
-    der.Omega.star.inv.nu2.2 <- -t(Omega.star.inv*n.coords[[1]]/nu2.2)%*%
-      Omega.star.inv
-    der.M.nu2.2 <- -t(R*n.coords[[1]]/nu2.2)
-    M1.trace.nu2.2 <- M.det.inv*t(der.M.nu2.2)
-    trace1.nu2.2 <- sum(M1.trace.nu2.2)
-    v.beta.nu2.2 <- as.numeric(der.Omega.star.inv.nu2.2%*%
-                                 diff.y.tilde[[1]])
-    q.f.nu2.2 <- as.numeric(t(diff.y.tilde[[1]])%*%v.beta.nu2.2)
-    grad.nu2.2 <- -0.5*(-q.f1/nu2.2+2*q.f2[[1]]/(nu2.2^2))/sigma2+
-      -0.5*(m+trace1.nu2.2+
-              q.f.nu2.2/((nu2.2^2)*sigma2))
+    der_omega2_q.f.y <- -as.numeric(sum(diff.y^2)/omega2^2)
+    der_omega2_Sigma_star <- -C_g_m/omega2^2
+    der_omega2_Sigma_tilde <- -Sigma_g_C_g_m/omega2^2
+    der_omega2_trace <- sum(diag(Sigma_tilde_inv%*%der_omega2_Sigma_tilde))
+    der_omega2_q.f.y_tilde <- -2*as.numeric(t(diff.y.tilde)%*%Sigma_star_inv%*%diff.y.tilde/
+                                (omega2^3))-
+                              as.numeric(t(diff.y.tilde)%*%Sigma_star_inv%*%
+                                           der_omega2_Sigma_star%*%
+                                           Sigma_star_inv%*%diff.y.tilde/
+                              (omega2^2))
+    g[ind_omega2] <- (-0.5*(m/omega2+der_omega2_trace+
+                           der_omega2_q.f.y-der_omega2_q.f.y_tilde))*omega2
 
     if(n_re>0) {
-      grad.nu2_re <- rep(NA, n_re)
       for(i in 1:n_re) {
+        select_col <- sum(n_dim_re[1:i])
 
-        o.inv_re <- ((1/nu2_re[i]+n.coords[[i+1]]/nu2.2)*(nu2.2^2))
-        der_nu2_re_o.inv_re <- -(nu2.2^2)/(nu2_re[i]^2)
-
-        der_nu2_re_log.det_re_i <- sum((n.coords[[i+1]]/nu2.2)/
-                                        (1+n.coords[[i+1]]*nu2_re[i]/nu2.2))
-
-        grad.nu2_re[i] <-  (-0.5*(der_nu2_re_log.det_re_i+
-                              sum(der_nu2_re_o.inv_re*
-                              diff.y.tilde[[i+1]]^2/(sigma2*o.inv_re^2))))*nu2_re[i]
-
-        der_nu2.2_re_o.inv_re <- (2*nu2.2/nu2_re[i]+n.coords[[i+1]])
-
-        der_nu2.2_log.det_re_i <- -sum((n.coords[[i]]*nu2_re[i]/nu2.2^2)/
-                                        (1+n.coords[[i+1]]*nu2_re[i]/nu2.2))
-
-        grad.nu2.2 <- grad.nu2.2 + -0.5*(sum(der_nu2.2_re_o.inv_re*
-                                       diff.y.tilde[[i+1]]^2/
-                                      (sigma2*o.inv_re^2))*nu2.2+
-                      der_nu2.2_log.det_re_i*nu2.2)
+        der_Sigma_g_inv_sigma2_re <- matrix(0, nrow = sum(n_dim_re),
+                                            ncol = sum(n_dim_re))
+        diag(der_Sigma_g_inv_sigma2_re[select_col+1:n_dim_re[i+1],
+                                       select_col+1:n_dim_re[i+1]])  <-
+          -1/sigma2_re[i]^2
+        der_sigma2_re_aux <- Sigma_star_inv%*%der_Sigma_g_inv_sigma2_re
+        der_sigma2_re_Sigma_g <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
+        diag(der_sigma2_re_Sigma_g[select_col+1:n_dim_re[i+1],
+                                   select_col+1:n_dim_re[i+1]])  <- 1
+        der_sigma2_re_Sigma_g <- der_sigma2_re_Sigma_g%*%C_g_m/omega2
+        der_sigma2_re_trace <- sum(diag(Sigma_tilde_inv%*%der_sigma2_re_Sigma_g))
+        g[ind_sigma2_re[i]] <- (-0.5*der_sigma2_re_trace-0.5*t(diff.y.tilde)%*%
+                                  der_sigma2_re_aux%*%Sigma_star_inv%*%
+                                  diff.y.tilde/(omega2^2))*sigma2_re[i]
       }
     }
-
-    if(is.null(fix_tau2)) {
-      der.Omega.star.inv.nu2.1 <- -Omega.star.R.inv%*%t(Omega.star.R.inv)*nu2.1
-      trace1.nu2.1 <- sum(diag(M.det.inv)*n.coords[[1]]*nu2.1/nu2.2)
-      v.beta.nu2.1 <- as.numeric(der.Omega.star.inv.nu2.1%*%
-                                   diff.y.tilde[[1]])
-      q.f.nu2.1 <- as.numeric(t(diff.y.tilde[[1]])%*%v.beta.nu2.1)
-      grad.nu2.1 <- -0.5*(trace1.nu2.1+
-                            q.f.nu2.1/((nu2.2^2)*sigma2))
-    }
-
-
-    if(is.null(fix_tau2)) {
-      if(n_re>0) {
-        g <- c(grad.beta,grad.sigma2,grad.phi,grad.nu2.1,grad.nu2.2,
-               grad.nu2_re)
-      } else {
-        g <- c(grad.beta,grad.sigma2,grad.phi,grad.nu2.1,grad.nu2.2)
-      }
-    } else {
-      if(n_re>0) {
-        g <- c(grad.beta,grad.sigma2,grad.phi,grad.nu2.2,
-               grad.nu2_re)
-      } else {
-        g <- c(grad.beta,grad.sigma2,grad.phi,grad.nu2.2)
-      }
-    }
-
     return(g)
   }
 
   DtD <- t(D)%*%D
   Dty <- as.numeric(t(D)%*%y)
   D.tilde <- list()
-  DtD.tilde <- list()
   y.tilde <- list()
   for(i in 1:(1+n_re)) {
     D.tilde[[i]] <- sapply(1:p,function(j) as.numeric(tapply(D[,j],ID_g[,i],sum)))
     y.tilde[[i]] <- tapply(y,ID_coords,sum)
-    DtD.tilde <- t(D.tilde[[i]])%*%D.tilde[[i]]
   }
 
 
@@ -489,13 +525,13 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
     phi <- exp(par[p+2])
     if(!is.null(fix_tau2)) {
       nu2.1 <- fix_tau2/sigma2
-      nu2.2 <- exp(par[p+3])
+      omega2 <- exp(par[p+3])
       if(n_re>0) {
         nu2_re <- exp(par[(p+3+1):(p+3+n_re)])
       }
     } else {
       nu2.1 <- exp(par[p+3])
-      nu2.2 <- exp(par[p+4])
+      omega2 <- exp(par[p+4])
       if(n_re>0) {
         nu2_re <- exp(par[(p+4+1):(p+4+n_re)])
       }
@@ -506,7 +542,7 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
     diag(R) <- diag(R)+nu2.1
     R.inv <- solve(R)
     Omega.star <- R.inv
-    diag(Omega.star) <- (diag(Omega.star)+n.coords[[1]]/nu2.2)
+    diag(Omega.star) <- (diag(Omega.star)+n.coords[[1]]/omega2)
     Omega.star.inv <- solve(Omega.star)
 
     mu <- as.numeric(D%*%beta)
@@ -516,93 +552,93 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
     diff.y.tilde <- list()
     q.f2 <- list()
     v <- list()
-    v.beta.nu2.2 <- list()
-    q.f <- q.f1/nu2.2
-    grad.beta <- t(D)%*%(diff.y/nu2.2)/sigma2
+    v.beta.omega2 <- list()
+    q.f <- q.f1/omega2
+    grad.beta <- t(D)%*%(diff.y/omega2)/sigma2
 
 
-    der.Omega.star.inv.nu2.2 <- -t(Omega.star.inv*n.coords[[1]]/nu2.2)%*%
+    der.Omega.star.inv.omega2 <- -t(Omega.star.inv*n.coords[[1]]/omega2)%*%
       Omega.star.inv
     for(i in 1:(1+n_re)) {
       diff.y.tilde[[i]] <- as.numeric(tapply(diff.y, ID_g[,i], sum))
       if(i==1) {
         v[[i]] <- as.numeric(Omega.star.inv%*%diff.y.tilde[[i]])
-        v.beta.nu2.2[[i]] <- as.numeric(der.Omega.star.inv.nu2.2%*%
+        v.beta.omega2[[i]] <- as.numeric(der.Omega.star.inv.omega2%*%
                                           diff.y.tilde[[i]])
       } else {
-        v[[i]] <- diff.y.tilde[[i]]/(1/nu2_re[i-1]+n.coords[[i]]/nu2.2)
+        v[[i]] <- diff.y.tilde[[i]]/(1/nu2_re[i-1]+n.coords[[i]]/omega2)
 
-        v.beta.nu2.2[[i]] <- (-n.coords[[i]]/nu2.2)*diff.y.tilde[[i]]
+        v.beta.omega2[[i]] <- (-n.coords[[i]]/omega2)*diff.y.tilde[[i]]
 
       }
       q.f2[[i]] <- as.numeric(t(diff.y.tilde[[i]])%*%v[[i]])
-      q.f <- q.f-q.f2[[i]]/(nu2.2^2)
+      q.f <- q.f-q.f2[[i]]/(omega2^2)
 
       grad.beta <- grad.beta - as.numeric(t(D)%*%v[[i]][ID_g[,i]]/
-                                            (nu2.2^2))/sigma2
+                                            (omega2^2))/sigma2
     }
 
     grad.sigma2 <- -0.5*(m-q.f/sigma2)
 
-    M.det <- t(R*n.coords[[1]]/nu2.2)
+    M.det <- t(R*n.coords[[1]]/omega2)
     diag(M.det) <- diag(M.det)+1
     M.det.inv <- solve(M.det)
 
     R1.phi <- matern.grad.phi(U,phi,kappa)*phi
     Omega.star.R.inv <- Omega.star.inv%*%R.inv
     der.Omega.star.inv.phi <- Omega.star.R.inv%*%R1.phi%*%t(Omega.star.R.inv)
-    der.M.phi <- t(R1.phi*n.coords[[1]]/nu2.2)
+    der.M.phi <- t(R1.phi*n.coords[[1]]/omega2)
     M1.trace.phi <- M.det.inv*t(der.M.phi)
     trace1.phi <- sum(M1.trace.phi)
     v.beta.phi <- as.numeric(der.Omega.star.inv.phi%*%diff.y.tilde[[1]])
     q.f.phi <-  as.numeric(t(diff.y.tilde[[1]])%*%v.beta.phi)
     grad.phi <- -0.5*(trace1.phi-
-                        q.f.phi/((nu2.2^2)*sigma2))
+                        q.f.phi/((omega2^2)*sigma2))
 
-    der.M.nu2.2 <- -t(R*n.coords[[1]]/nu2.2)
-    M1.trace.nu2.2 <- M.det.inv*t(der.M.nu2.2)
-    trace1.nu2.2 <- sum(M1.trace.nu2.2)
-    v.beta.nu2.2 <- as.numeric(der.Omega.star.inv.nu2.2%*%
+    der.M.omega2 <- -t(R*n.coords[[1]]/omega2)
+    M1.trace.omega2 <- M.det.inv*t(der.M.omega2)
+    trace1.omega2 <- sum(M1.trace.omega2)
+    v.beta.omega2 <- as.numeric(der.Omega.star.inv.omega2%*%
                                  diff.y.tilde[[1]])
-    q.f.nu2.2 <- as.numeric(t(diff.y.tilde[[1]])%*%v.beta.nu2.2)
-    grad.nu2.2 <- -0.5*(-q.f1/nu2.2+2*q.f2[[1]]/(nu2.2^2))/sigma2+
-      -0.5*(m+trace1.nu2.2+
-              q.f.nu2.2/((nu2.2^2)*sigma2))
+    q.f.omega2 <- as.numeric(t(diff.y.tilde[[1]])%*%v.beta.omega2)
+    grad.omega2 <- -0.5*(-q.f1/omega2+2*q.f2[[1]]/(omega2^2))/sigma2+
+      -0.5*(m+trace1.omega2+
+              q.f.omega2/((omega2^2)*sigma2))
 
     if(n_re>0) {
       grad.nu2_re <- rep(NA, n_re)
       for(i in 1:n_re) {
 
-        o.inv_re <- ((1/nu2_re[i]+n.coords[[i+1]]/nu2.2)*(nu2.2^2))
-        der_nu2_re_o.inv_re <- -(nu2.2^2)/(nu2_re[i]^2)
+        o.inv_re <- ((1/nu2_re[i]+n.coords[[i+1]]/omega2)*(omega2^2))
+        der_nu2_re_o.inv_re <- -(omega2^2)/(nu2_re[i]^2)
 
-        der_nu2_re_log.det_re_i <- sum((n.coords[[i+1]]/nu2.2)/
-                                         (1+n.coords[[i+1]]*nu2_re[i]/nu2.2))
+        der_nu2_re_log.det_re_i <- sum((n.coords[[i+1]]/omega2)/
+                                         (1+n.coords[[i+1]]*nu2_re[i]/omega2))
 
         grad.nu2_re[i] <-  (-0.5*(der_nu2_re_log.det_re_i+
                                     sum(der_nu2_re_o.inv_re*
                                           diff.y.tilde[[i+1]]^2/(sigma2*o.inv_re^2))))*nu2_re[i]
 
-        der_nu2.2_re_o.inv_re <- (2*nu2.2/nu2_re[i]+n.coords[[i+1]])
+        der_omega2_re_o.inv_re <- (2*omega2/nu2_re[i]+n.coords[[i+1]])
 
-        der_nu2.2_log.det_re_i <- -sum((n.coords[[i]]*nu2_re[i]/nu2.2^2)/
-                                         (1+n.coords[[i+1]]*nu2_re[i]/nu2.2))
+        der_omega2_log.det_re_i <- -sum((n.coords[[i+1]]*nu2_re[i]/omega2^2)/
+                                         (1+n.coords[[i+1]]*nu2_re[i]/omega2))
 
-        grad.nu2.2 <- grad.nu2.2 + -0.5*(sum(der_nu2.2_re_o.inv_re*
+        grad.omega2 <- grad.omega2 + -0.5*(sum(der_omega2_re_o.inv_re*
                                                diff.y.tilde[[i+1]]^2/
-                                               (sigma2*o.inv_re^2))*nu2.2+
-                                           der_nu2.2_log.det_re_i*nu2.2)
+                                               (sigma2*o.inv_re^2))*omega2+
+                                           der_omega2_log.det_re_i*omega2)
       }
     }
 
     if(is.null(fix_tau2)) {
       der.Omega.star.inv.nu2.1 <- -Omega.star.R.inv%*%t(Omega.star.R.inv)*nu2.1
-      trace1.nu2.1 <- sum(diag(M.det.inv)*n.coords[[1]]*nu2.1/nu2.2)
+      trace1.nu2.1 <- sum(diag(M.det.inv)*n.coords[[1]]*nu2.1/omega2)
       v.beta.nu2.1 <- as.numeric(der.Omega.star.inv.nu2.1%*%
                                    diff.y.tilde[[1]])
       q.f.nu2.1 <- as.numeric(t(diff.y.tilde[[1]])%*%v.beta.nu2.1)
       grad.nu2.1 <- -0.5*(trace1.nu2.1+
-                            q.f.nu2.1/((nu2.2^2)*sigma2))
+                            q.f.nu2.1/((omega2^2)*sigma2))
     }
 
 
@@ -611,82 +647,79 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
     ind.phi <- p+2
     if(is.null(fix_tau2)) {
       if(n_re>0) {
-        g <- c(grad.beta,grad.sigma2,grad.phi,grad.nu2.1,grad.nu2.2,
+        g <- c(grad.beta,grad.sigma2,grad.phi,grad.nu2.1,grad.omega2,
                grad.nu2_re)
         H <- matrix(0,p+4+n_re,p+4+n_re)
         ind.nu2.1 <- p+3
-        ind.nu2.2 <- p+4
+        ind.omega2 <- p+4
         ind.nu2_re <- (p+4+1):(p+4+n_re)
       } else {
-        g <- c(grad.beta,grad.sigma2,grad.phi,grad.nu2.1,grad.nu2.2)
+        g <- c(grad.beta,grad.sigma2,grad.phi,grad.nu2.1,grad.omega2)
         H <- matrix(0,p+4,p+4)
         ind.nu2.1 <- p+3
-        ind.nu2.2 <- p+4
+        ind.omega2 <- p+4
       }
     } else {
       if(n_re>0) {
-        g <- c(grad.beta,grad.sigma2,grad.phi,grad.nu2.2,grad.nu2_re)
+        g <- c(grad.beta,grad.sigma2,grad.phi,grad.omega2,grad.nu2_re)
         H <- matrix(0,p+3+n_re,p+3+n_re)
-        ind.nu2.2 <- p+3
+        ind.omega2 <- p+3
         ind.nu2_re <- (p+3+1):(p+3+n_re)
       } else {
-        g <- c(grad.beta,grad.sigma2,grad.phi,grad.nu2.2)
+        g <- c(grad.beta,grad.sigma2,grad.phi,grad.omega2)
         H <- matrix(0,p+3,p+3)
-        ind.nu2.2 <- p+3
+        ind.omega2 <- p+3
       }
     }
 
-    H[ind.beta,ind.beta] <- -DtD/(sigma2*nu2.2)
+    H[ind.beta,ind.beta] <- -DtD/(sigma2*omega2)
     for(i in 1:(n_re+1)) {
       if(i==1) {
         H[ind.beta,ind.beta] <- H[ind.beta,ind.beta] +
-          (t(D.tilde[[i]])%*%Omega.star.inv%*%D.tilde[[i]]/(nu2.2^2))/sigma2
+          (t(D.tilde[[i]])%*%Omega.star.inv%*%D.tilde[[i]]/(omega2^2))/sigma2
       } else {
-        o.inv_re_aux <- ((1/nu2_re[i-1]+n.coords[[i]]/nu2.2))
+        o.inv_re_aux <- ((1/nu2_re[i-1]+n.coords[[i]]/omega2))
         H[ind.beta,ind.beta] <- H[ind.beta,ind.beta] +
-          (t(D.tilde[[i]])%*%((1/o.inv_re_aux)*D.tilde[[i]])/(nu2.2^2))/sigma2
+          (t(D.tilde[[i]])%*%((1/o.inv_re_aux)*D.tilde[[i]])/(omega2^2))/sigma2
       }
     }
 
 
     H[ind.beta,ind.sigma2] <- H[ind.sigma2,ind.beta] <- -grad.beta
 
-    H[ind.beta,ind.phi] <- H[ind.phi,ind.beta] <- -t(D)%*%v.beta.phi[ID_g[,1]]/((nu2.2^2)*sigma2)
+    H[ind.beta,ind.phi] <- H[ind.phi,ind.beta] <- -t(D)%*%v.beta.phi[ID_g[,1]]/((omega2^2)*sigma2)
 
     if(is.null(fix_tau2)) {
 
-      H[ind.beta,ind.nu2.1] <- H[ind.nu2.1,ind.beta] <- t(D)%*%v.beta.nu2.1[ID_g[,1]]/((nu2.2^2)*sigma2)
+      H[ind.beta,ind.nu2.1] <- H[ind.nu2.1,ind.beta] <- t(D)%*%v.beta.nu2.1[ID_g[,1]]/((omega2^2)*sigma2)
 
     }
 
-    H[ind.beta,ind.nu2.2] <-
-    H[ind.nu2.2,ind.beta] <- as.numeric(t(D)%*%(-diff.y/nu2.2+
-                            2*v[[1]][ID_g[,1]]/(nu2.2^2))/sigma2)+
-    t(D)%*%v.beta.nu2.2[ID_g[,1]]/((nu2.2^2)*sigma2)
+    H[ind.beta,ind.omega2] <-
+    H[ind.omega2,ind.beta] <- as.numeric(t(D)%*%(-diff.y/omega2+
+                            2*v[[1]][ID_g[,1]]/(omega2^2))/sigma2)+
+    t(D)%*%v.beta.omega2[ID_g[,1]]/((omega2^2)*sigma2)
+
+    if(n_re>0) {
+      for(i in 1:n_re) {
+        o.inv_re <- ((1/nu2_re[i]+n.coords[[i+1]]/omega2)*(omega2^2))
+        der_nu2_re_o.inv_re <- -(omega2^2)/(nu2_re[i]^2)
 
 
-    for(i in 1:n_re) {
-      o.inv_re <- ((1/nu2_re[i]+n.coords[[i+1]]/nu2.2)*(nu2.2^2))
-      der_nu2_re_o.inv_re <- -(nu2.2^2)/(nu2_re[i]^2)
+        der_omega2_re_o.inv_re <- (2*omega2/nu2_re[i]+n.coords[[i+1]])
 
+        H[ind.beta,ind.omega2] <-
+          H[ind.omega2,ind.beta] <- H[ind.omega2,ind.beta] +
+          t(D.tilde[[i+1]]*(((der_omega2_re_o.inv_re/
+                                (sigma2*o.inv_re^2))*omega2)))%*%
+          (diff.y.tilde[[i+1]])
 
-      der_nu2.2_re_o.inv_re <- (2*nu2.2/nu2_re[i]+n.coords[[i+1]])
+        H[ind.beta, ind.nu2_re[i]] <-
+          H[ind.nu2_re[i], ind.beta] <-  t(D.tilde[[i+1]]*((der_nu2_re_o.inv_re/
+                                                              (sigma2*o.inv_re^2))*nu2_re[i]))%*%
+          (diff.y.tilde[[i+1]])
 
-#      -0.5*(sum(der_nu2.2_re_o.inv_re*
-#                  diff.y.tilde[[i+1]]^2/
-#                  (sigma2*o.inv_re^2))
-
-      H[ind.beta,ind.nu2.2] <-
-      H[ind.nu2.2,ind.beta] <- H[ind.nu2.2,ind.beta] +
-        t(D.tilde[[i+1]]*(((der_nu2.2_re_o.inv_re/
-                   (sigma2*o.inv_re^2))*nu2.2)))%*%
-                    (diff.y.tilde[[i+1]])
-
-      H[ind.beta, ind.nu2_re[i]] <-
-      H[ind.nu2_re[i], ind.beta] <-  t(D.tilde[[i+1]]*((der_nu2_re_o.inv_re/
-                                      (sigma2*o.inv_re^2))*nu2_re[i]))%*%
-                                      (diff.y.tilde[[i+1]])
-
+      }
     }
 
     H[ind.sigma2,ind.sigma2] <- -0.5*q.f/sigma2
@@ -695,23 +728,23 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
     if(is.null(fix_tau2)) {
       H[ind.sigma2,ind.nu2.1] <- H[ind.nu2.1,ind.sigma2] <- -(grad.nu2.1+0.5*(trace1.nu2.1))
     }
-    H[ind.sigma2,ind.nu2.2] <- H[ind.nu2.2,ind.sigma2] <-
-      0.5*(-q.f1/nu2.2+2*q.f2[[1]]/(nu2.2^2))/sigma2+
-      0.5*(q.f.nu2.2/((nu2.2^2)*sigma2))
+    H[ind.sigma2,ind.omega2] <-
+      0.5*(-q.f1/omega2+2*q.f2[[1]]/(omega2^2))/sigma2+
+      0.5*(q.f.omega2/((omega2^2)*sigma2))
 
     if(n_re>0) {
       for(i in 1:n_re) {
 
 
-        o.inv_re <- ((1/nu2_re[i]+n.coords[[i+1]]/nu2.2)*(nu2.2^2))
-        der_nu2_re_o.inv_re <- -(nu2.2^2)/(nu2_re[i]^2)
+        o.inv_re <- ((1/nu2_re[i]+n.coords[[i+1]]/omega2)*(omega2^2))
+        der_nu2_re_o.inv_re <- -(omega2^2)/(nu2_re[i]^2)
 
-        der_nu2.2_re_o.inv_re <- (2*nu2.2/nu2_re[i]+n.coords[[i+1]])
+        der_omega2_re_o.inv_re <- (2*omega2/nu2_re[i]+n.coords[[i+1]])
 
 
-        H[ind.sigma2,ind.nu2.2] <- H[ind.sigma2,ind.nu2.2] +
-          0.5*sum(der_nu2.2_re_o.inv_re*diff.y.tilde[[i+1]]^2/
-         (sigma2*o.inv_re^2))*nu2.2
+        H[ind.sigma2,ind.omega2] <- H[ind.sigma2,ind.omega2] +
+          0.5*sum(der_omega2_re_o.inv_re*diff.y.tilde[[i+1]]^2/
+         (sigma2*o.inv_re^2))*omega2
 
         H[ind.sigma2,ind.nu2_re[i]] <-
           H[ind.nu2_re[i],ind.sigma2] <- (0.5*(sum(der_nu2_re_o.inv_re*
@@ -721,6 +754,7 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
 
       }
     }
+    H[ind.omega2,ind.sigma2] <- H[ind.sigma2,ind.omega2]
 
     R2.phi <- matern.hessian.phi(U,phi,kappa)*(phi^2)+
               R1.phi
@@ -729,7 +763,7 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
     der2.Omega.star.inv.phi <- Omega.star.inv%*%(2*V1.phi%*%
                                                    Omega.star.inv%*%V1.phi-V2.phi)%*%
       Omega.star.inv
-    M2.trace.phi <- M.det.inv*((R2.phi*n.coords[[1]]/nu2.2))
+    M2.trace.phi <- M.det.inv*((R2.phi*n.coords[[1]]/omega2))
     B2.phi <- M.det.inv%*%der.M.phi
 
     trace2.phi <- sum(M2.trace.phi)-
@@ -737,7 +771,7 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
     H[ind.phi,ind.phi] <- -0.5*(trace2.phi-
                                   as.numeric(t(diff.y.tilde[[1]])%*%
                                                der2.Omega.star.inv.phi%*%
-                                               diff.y.tilde[[1]])/((nu2.2^2)*sigma2))
+                                               diff.y.tilde[[1]])/((omega2^2)*sigma2))
     if(is.null(fix_tau2)) {
 
       V1.nu2.1 <- -R.inv%*%R.inv*nu2.1
@@ -747,29 +781,29 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
           V1.nu2.1%*%Omega.star.inv%*%V1.phi-
           V2.phi.nu2.1)%*%
         Omega.star.inv
-      B2.nu2.1 <- t(t(M.det.inv)*n.coords[[1]]*nu2.1/nu2.2)
+      B2.nu2.1 <- t(t(M.det.inv)*n.coords[[1]]*nu2.1/omega2)
       trace2.phi.nu2.1 <- -sum(B2.phi*t(B2.nu2.1))
 
       H[ind.phi,ind.nu2.1] <- H[ind.nu2.1,ind.phi] <- -0.5*(trace2.phi.nu2.1-
                                                               as.numeric(t(diff.y.tilde[[1]])%*%
                                                                            der2.Omega.star.inv.phi.nu2.1%*%
-                                                                           diff.y.tilde[[1]])/((nu2.2^2)*sigma2))
+                                                                           diff.y.tilde[[1]])/((omega2^2)*sigma2))
 
     }
 
-    der2.Omega.star.inv.phi.nu2.2 <- Omega.star.inv%*%(
+    der2.Omega.star.inv.phi.omega2 <- Omega.star.inv%*%(
       V1.phi%*%t(-Omega.star.inv*
-                   n.coords[[1]]/nu2.2)+
+                   n.coords[[1]]/omega2)+
         (-Omega.star.inv*
-           n.coords[[1]]/nu2.2)%*%V1.phi)%*%
+           n.coords[[1]]/omega2)%*%V1.phi)%*%
       Omega.star.inv
-    B2.nu2.2 <- M.det.inv%*%der.M.nu2.2
-    trace2.phi.nu2.2 <- -trace1.phi-sum(B2.phi*t(B2.nu2.2))
-    H[ind.phi,ind.nu2.2] <- H[ind.nu2.2,ind.phi] <- -0.5*(trace2.phi.nu2.2+
+    B2.omega2 <- M.det.inv%*%der.M.omega2
+    trace2.phi.omega2 <- -trace1.phi-sum(B2.phi*t(B2.omega2))
+    H[ind.phi,ind.omega2] <- H[ind.omega2,ind.phi] <- -0.5*(trace2.phi.omega2+
                                                             -as.numeric(t(diff.y.tilde[[1]])%*%
-                                                             der2.Omega.star.inv.phi.nu2.2%*%
-                                                               diff.y.tilde[[1]])/((nu2.2^2)*sigma2)+
-                                                            +2*q.f.phi/((nu2.2^2)*sigma2))
+                                                             der2.Omega.star.inv.phi.omega2%*%
+                                                               diff.y.tilde[[1]])/((omega2^2)*sigma2)+
+                                                            +2*q.f.phi/((omega2^2)*sigma2))
 
 
     if(is.null(fix_tau2)) {
@@ -786,73 +820,138 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, re_unique,
       H[ind.nu2.1,ind.nu2.1] <- -0.5*(trace2.nu2.1-
                                         as.numeric(t(diff.y.tilde[[1]])%*%
                                                      der2.Omega.star.inv.nu2.1%*%
-                                                     diff.y.tilde[[1]])/((nu2.2^2)*sigma2))
+                                                     diff.y.tilde[[1]])/((omega2^2)*sigma2))
 
-      der2.Omega.star.inv.nu2.1.nu2.2 <- Omega.star.inv%*%(
+      der2.Omega.star.inv.nu2.1.omega2 <- Omega.star.inv%*%(
         V1.nu2.1%*%t(-Omega.star.inv*
-                       n.coords[[1]]/nu2.2)+
+                       n.coords[[1]]/omega2)+
           (-Omega.star.inv*
-             n.coords[[1]]/nu2.2)%*%V1.nu2.1)%*%
+             n.coords[[1]]/omega2)%*%V1.nu2.1)%*%
         Omega.star.inv
 
-      trace2.nu2.1.nu2.2 <- -trace1.nu2.1-sum(B2.nu2.1*t(B2.nu2.2))
-      H[ind.nu2.1,ind.nu2.2] <- H[ind.nu2.2,ind.nu2.1] <- -0.5*(trace2.nu2.1.nu2.2+
+      trace2.nu2.1.omega2 <- -trace1.nu2.1-sum(B2.nu2.1*t(B2.omega2))
+      H[ind.nu2.1,ind.omega2] <- H[ind.omega2,ind.nu2.1] <- -0.5*(trace2.nu2.1.omega2+
                                                                   -as.numeric(t(diff.y.tilde[[1]])%*%
-                                                          der2.Omega.star.inv.nu2.1.nu2.2%*%
-                                                            diff.y.tilde[[1]])/((nu2.2^2)*sigma2)+
-                                                                  -2*q.f.nu2.1/((nu2.2^2)*sigma2))
+                                                          der2.Omega.star.inv.nu2.1.omega2%*%
+                                                            diff.y.tilde[[1]])/((omega2^2)*sigma2)+
+                                                                  -2*q.f.nu2.1/((omega2^2)*sigma2))
 
     }
 
-    if(FALSE) {
-
-    aux.nu2.2 <- 2*t(Omega.star.inv*n.coords)*n.coords/
-      (nu2.2^2)
-    diag(aux.nu2.2) <- diag(aux.nu2.2)-n.coords/nu2.2
-    der2.Omega.star.inv.nu2.2 <- -Omega.star.inv%*%(
-      aux.nu2.2)%*%
+    aux.omega2 <- 2*t(Omega.star.inv*n.coords[[1]])*n.coords[[1]]/
+      (omega2^2)
+    diag(aux.omega2) <- diag(aux.omega2)-n.coords[[1]]/omega2
+    der2.Omega.star.inv.omega2 <- -Omega.star.inv%*%(
+      aux.omega2)%*%
       Omega.star.inv
 
-    trace2.nu2.2 <- -trace1.nu2.2-
-      sum(B2.nu2.2*t(B2.nu2.2))
-    H[ind.nu2.2,ind.nu2.2] <- -0.5*(q.f1/nu2.2-4*q.f2/(nu2.2^2)-4*q.f.nu2.2/(nu2.2^2))/sigma2+
-      -0.5*(trace2.nu2.2+as.numeric(t(diff.y.tilde)%*%
-                                      der2.Omega.star.inv.nu2.2%*%diff.y.tilde)/((nu2.2^2)*sigma2))
+    trace2.omega2 <- -trace1.omega2-
+      sum(B2.omega2*t(B2.omega2))
+    H[ind.omega2,ind.omega2] <- -0.5*(q.f1/omega2-4*q.f2[[1]]/(omega2^2)-4*q.f.omega2/(omega2^2))/sigma2+
+      -0.5*(trace2.omega2+as.numeric(t(diff.y.tilde[[1]])%*%
+                                      der2.Omega.star.inv.omega2%*%
+                                      diff.y.tilde[[1]])/
+              ((omega2^2)*sigma2))
+    if(n_re>0) {
+      for(i in 1:n_re) {
 
+        o.inv_re <- ((1/nu2_re[i]+n.coords[[i+1]]/omega2)*(omega2^2))
+
+        der_omega2_re_o.inv_re <- (2*omega2/nu2_re[i]+n.coords[[i+1]])
+        der2_omega2_re_o.inv_re <- 2/nu2_re[i]
+        der_nu2_re_o.inv_re <- -(omega2^2)/(nu2_re[i]^2)
+        der2_nu2_re_o.inv_re <- 2*(omega2^2)/(nu2_re[i]^3)
+        der_nu2_re_omega2_o.inv_re <- -2*(omega2)/(nu2_re[i]^2)
+
+        den_aux <- 1+n.coords[[i+1]]*nu2_re[i]/omega2
+        a_aux <- -n.coords[[i+1]]*nu2_re[i]/omega2^2
+        b_aux <- 2*n.coords[[i+1]]*nu2_re[i]/omega2^3
+        der_omega2_log.det_re_i <- sum(a_aux/den_aux)
+        der2_omega2_log.det_re_i <- sum((b_aux*den_aux-a_aux^2)/
+                                         (den_aux^2))
+        der_nu2_re_omega2_log.det_re_i <- sum(((-n.coords[[i+1]]/(omega2^2))*den_aux+
+                                                -(n.coords[[i+1]]/omega2)*a_aux)/
+                                               (den_aux^2))
+        der_nu2_re_log.det_re_i <- sum((n.coords[[i+1]]/omega2)/
+                                         (1+n.coords[[i+1]]*nu2_re[i]/omega2))
+
+        der2_nu2_re_log.det_re_i <- -sum((n.coords[[i+1]]/omega2)^2/
+                                         (1+n.coords[[i+1]]*nu2_re[i]/omega2)^2)
+
+        H[ind.omega2,ind.omega2] <-
+          H[ind.omega2,ind.omega2] + -0.5*(sum(der_omega2_re_o.inv_re*
+                                               diff.y.tilde[[i+1]]^2/
+                                               (sigma2*o.inv_re^2))*omega2+
+                                         sum((der2_omega2_re_o.inv_re*o.inv_re+
+                                            -2*der_omega2_re_o.inv_re^2)*
+                                               diff.y.tilde[[i+1]]^2/
+                                                 (sigma2*o.inv_re^3))*(omega2^2)+
+                                           der_omega2_log.det_re_i*omega2+
+                                           der2_omega2_log.det_re_i*omega2^2)
+
+        #der_omega2_log.det_re_i <- -sum((n.coords[[i+1]]*nu2_re[i]/omega2^2)/
+        #                                 (1+n.coords[[i+1]]*nu2_re[i]/omega2))
+
+
+        #der_nu2_re_o.inv_re <- -(omega2^2)/(nu2_re[i]^2)
+
+        #grad.nu2_re[i] <-  (-0.5*(der_nu2_re_log.det_re_i+
+        #                            sum(der_nu2_re_o.inv_re*
+        #                                  diff.y.tilde[[i+1]]^2/(sigma2*o.inv_re^2))))*nu2_re[i]
+
+        #der_nu2_re_log.det_re_i <- sum((n.coords[[i+1]]/omega2)/
+        #                                 (1+n.coords[[i+1]]*nu2_re[i]/omega2))
+
+
+        H[ind.omega2,ind.nu2_re[i]] <-
+        H[ind.nu2_re[i],ind.omega2] <-
+          (-0.5*(der_nu2_re_omega2_log.det_re_i+
+          sum((der_nu2_re_omega2_o.inv_re*o.inv_re+
+          -2*der_nu2_re_o.inv_re*der_omega2_re_o.inv_re)*
+          diff.y.tilde[[i+1]]^2/(sigma2*o.inv_re^3))))*
+          omega2*nu2_re[i]
+
+        #der_nu2_re_o.inv_re <- -(omega2^2)/(nu2_re[i]^2)
+        #der2_nu2_re_o.inv_re <- 2*(omega2^2)/(nu2_re[i]^3)
+
+        #der_nu2_re_log.det_re_i <- sum((n.coords[[i+1]]/omega2)/
+        #                                 (1+n.coords[[i+1]]*nu2_re[i]/omega2))
+        #der2_nu2_re_log.det_re_i <- -sum((n.coords[[i+1]]/omega2)^2/
+        #                                 (1+n.coords[[i+1]]*nu2_re[i]/omega2)^2)
+
+        H[ind.nu2_re[i], ind.nu2_re[i]] <-
+          (-0.5*(der_nu2_re_log.det_re_i+
+          sum(der_nu2_re_o.inv_re*
+          diff.y.tilde[[i+1]]^2/(sigma2*o.inv_re^2))))*nu2_re[i]+
+          (-0.5*(der2_nu2_re_log.det_re_i+
+                sum((der2_nu2_re_o.inv_re*o.inv_re-
+                     2*der_nu2_re_o.inv_re^2)*
+                diff.y.tilde[[i+1]]^2/(sigma2*o.inv_re^3))))*(nu2_re[i]^2)
+
+      }
     }
     return(H)
   }
 
   start_cov_pars[-(1:2)] <- start_cov_pars[-(1:2)]/start_cov_pars[1]
   start_par <- c(start_beta, log(start_cov_pars))
-  if(method=="nlminb") {
-    estNLMINB <- nlminb(start_par,
+
+  estNLMINB <- nlminb(start_par,
                         function(x) -log.lik(x),
-                        function(x) -grad.log.lik(x),
-                        function(x) -hessian.log.lik(x),
                         control=list(trace=1*messages))
 
-    estim$estimate <- estNLMINB$par
-    hess.MLE <- hessian.log.lik(estim$estimate)
-    if(messages) {
-      grad.MLE <- grad.log.lik(estim$estimate)
+  estim$estimate <- estNLMINB$par
+  hess.MLE <- hessian.log.lik(estim$estimate)
+
+  grad.MLE <- grad.log.lik(estim$estimate)
       cat("\n","Gradient at MLE:",
           paste(round(grad.MLE,10)),"\n")
-    }
-    estim$covariance <- solve(-hess.MLE)
-    estim$log.lik <- -estNLMINB$objective
 
-  } else if(method=="BFGS") {
-    estimBFGS <- maxBFGS(log.lik,grad.log.lik,hessian.log.lik,
-                         start_par,print.level=1*messages)
-    estim$estimate <- estimBFGS$estimate
-    if(messages) {
-      cat("\n","Gradient at MLE:",
-          paste(round(estimBFGS$gradient,10)),"\n")
-    }
-    estim$covariance <- solve(-estimBFGS$hessian)
-    estim$log.lik <- estimBFGS$maximum
-  }
-  class(estim) <- "PrevMap"
+  estim$covariance <- solve(-hess.MLE)
+  estim$log.lik <- -estNLMINB$objective
+  estim$covariance <- solve(-estimBFGS$hessian)
+  estim$log.lik <- estimBFGS$maximum
+
+  class(estim) <- "RiskMap"
   return(estim)
 }
