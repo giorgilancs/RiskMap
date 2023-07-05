@@ -62,15 +62,10 @@ How should the user specify the model?
 
 ``` r
 # OPTION 1
-y ~ rainfall + GP(x, y) + iid(id_school) + iid(id_region)
-
-# OPTION 2
-y ~ rainfall + re(x, y, type = "GP") + re(id_school, type = "iid") + re(id_region, type = "iid")
+y ~ rainfall + gp(x, y) + re(id_school) + re(id_region)
 
 glgm <- function(formula,
                  m_offset = NULL,
-                 geo_re = "GP",
-                 hr_re = NULL,
                  data,
                  family,
                  convert_to_crs = NULL,
