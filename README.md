@@ -55,3 +55,15 @@ You can also embed plots, for example:
 
 In that case, don’t forget to commit and push the resulting figure
 files, so they display on GitHub and CRAN.
+
+## Estimation function design
+
+How should the user specify the model?
+
+``` r
+# OPTION 1
+y ~ rainfall + GP(x, y) + iid(id_school) + iid(id_region)
+
+# OPTION 2
+y ~ rainfall + re(x, y, type = "GP") + re(id_school, type = "iid") + re(id_region, type = "iid")
+```
