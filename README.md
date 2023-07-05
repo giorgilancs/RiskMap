@@ -64,6 +64,12 @@ How should the user specify the model?
 # OPTION 1
 y ~ rainfall + gp(x, y) + re(id_school) + re(id_region)
 
+# Arguments for gp function
+gp(x, y, kappa = (numeric_value, default = 0.5), nugget = c(T = default, F, fixed_numeric_value), ...)
+
+# Arguments for re function
+# re(numeric or categorical variable, ...) only needs an index in the dataset
+
 glgm <- function(formula,
                  m_offset = NULL,
                  data,
