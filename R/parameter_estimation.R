@@ -468,41 +468,54 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, s_unique, re_unique,
     der_omega2_Sigma_star <- -C_g_m/omega2^2
     der_omega2_Sigma_tilde <- -Sigma_g_C_g_m/omega2^2
     der_omega2_trace <- sum(diag(Sigma_tilde_inv%*%der_omega2_Sigma_tilde))
-    M_beta_omega2 <- Sigma_star_inv%*%der_omega2_Sigma_star%*%Sigma_star_inv
+    M_beta_omega2 <- -Sigma_star_inv%*%der_omega2_Sigma_star%*%Sigma_star_inv
 
     num1_omega2 <- as.numeric(t(diff.y.tilde)%*%Sigma_star_inv%*%diff.y.tilde)
     der_num1_omega2 <- as.numeric(t(diff.y.tilde)%*%
                                     M_beta_omega2%*%diff.y.tilde)
-    der_omega2_q.f.y_tilde <- -2*num1_omega2/(omega2^3)-
+    der_omega2_q.f.y_tilde <- -2*num1_omega2/(omega2^3)+
       der_num1_omega2/(omega2^2)
 
     g[ind_omega2] <- (-0.5*(m/omega2+der_omega2_trace+
                            der_omega2_q.f.y-der_omega2_q.f.y_tilde))*omega2
 
     if(n_re>0) {
+      der_sigma2_re_trace <- list()
+      sigma2_re_trace_aux <- list()
+      der_sigma2_re_Sigma_tilde <- list()
+      der_sigma2_re_Sigma_g <- list()
+      der_Sigma_g_inv_sigma2_re_aux <- list()
+      der_sigma2_re_aux <- list()
+      M_beta_sigma2_re <- list()
       for(i in 1:n_re) {
-        select_col <- sum(n_dim_re[1:i])
 
-        der_Sigma_g_inv_sigma2_re <- matrix(0, nrow = sum(n_dim_re),
-                                            ncol = sum(n_dim_re))
-        diag(der_Sigma_g_inv_sigma2_re[select_col+1:n_dim_re[i+1],
-                                       select_col+1:n_dim_re[i+1]])  <-
+        select_col <- sum(n_dim_re[1:i])
+        der_Sigma_g_inv_sigma2_re_aux[[i]] <- matrix(0, nrow = sum(n_dim_re),
+                                                     ncol = sum(n_dim_re))
+        diag(der_Sigma_g_inv_sigma2_re_aux[[i]][select_col+1:n_dim_re[i+1],
+                                                select_col+1:n_dim_re[i+1]])  <-
           -1/sigma2_re[i]^2
-        der_sigma2_re_aux <- Sigma_star_inv%*%der_Sigma_g_inv_sigma2_re
-        der_sigma2_re_Sigma_g <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
-        diag(der_sigma2_re_Sigma_g[select_col+1:n_dim_re[i+1],
-                                   select_col+1:n_dim_re[i+1]])  <- 1
-        der_sigma2_re_Sigma_tilde <- der_sigma2_re_Sigma_g%*%C_g_m/omega2
-        der_sigma2_re_trace <- sum(diag(Sigma_tilde_inv%*%der_sigma2_re_Sigma_tilde))
-        g[ind_sigma2_re[i]] <- (-0.5*der_sigma2_re_trace-0.5*t(diff.y.tilde)%*%
-                                  der_sigma2_re_aux%*%Sigma_star_inv%*%
-                                  diff.y.tilde/(omega2^2))*sigma2_re[i]
+        der_sigma2_re_aux[[i]] <- Sigma_star_inv%*%der_Sigma_g_inv_sigma2_re_aux[[i]]
+
+        M_beta_sigma2_re[[i]] <- der_sigma2_re_aux[[i]]%*%Sigma_star_inv
+
+        der_sigma2_re_Sigma_g[[i]] <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
+        diag(der_sigma2_re_Sigma_g[[i]][select_col+1:n_dim_re[i+1],
+                                        select_col+1:n_dim_re[i+1]]) <- 1
+        der_sigma2_re_Sigma_tilde[[i]] <- der_sigma2_re_Sigma_g[[i]]%*%C_g_m/omega2
+        sigma2_re_trace_aux[[i]] <- Sigma_tilde_inv%*%der_sigma2_re_Sigma_tilde[[i]]
+        der_sigma2_re_trace[[i]] <- sum(diag(sigma2_re_trace_aux[[i]]))
+        g[ind_sigma2_re[i]] <- (-0.5*der_sigma2_re_trace[[i]]-0.5*t(diff.y.tilde)%*%
+                                 M_beta_sigma2_re[[i]]%*%
+                                 diff.y.tilde/(omega2^2))*sigma2_re[i]
+
       }
     }
     return(g)
   }
 
   DtD <- t(D)%*%D
+
 
 
   hessian.log.lik <- function(par) {
@@ -966,7 +979,7 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, s_unique, re_unique,
     der_num1_omega2 <- as.numeric(t(diff.y.tilde)%*%
                                     M_beta_omega2%*%diff.y.tilde)
     der2_omega2_Sigma_star <- 2*C_g_m/omega2^3
-    M2_beta_omega2 <- -Sigma_star_inv%*%
+    M2_beta_omega2 <- Sigma_star_inv%*%
       (2*der_omega2_Sigma_star%*%Sigma_star_inv%*%der_omega2_Sigma_star-
          der2_omega2_Sigma_star)%*%
       Sigma_star_inv
@@ -980,12 +993,15 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, s_unique, re_unique,
       (der2_num1_omega2*omega2-
          2*der_num1_omega2)/(omega2^3)
 
+    #     g[ind_omega2] <- (-0.5*(m/omega2+der_omega2_trace+
+    #     der_omega2_q.f.y-der_omega2_q.f.y_tilde))*omega2
+
     der.omega2 <- (-0.5*(m/omega2+der_omega2_trace+
-                           der_omega2_q.f.y+der_omega2_q.f.y_tilde))*omega2
+                           der_omega2_q.f.y-der_omega2_q.f.y_tilde))*omega2
 
     H[ind_omega2, ind_omega2] <- der.omega2+
       -0.5*(-m/omega2^2+der2_omega2_trace+
-              der2_omega2_q.f.y)*(omega2^2)
+              der2_omega2_q.f.y-der2_omega2_q.f.y_tilde)*(omega2^2)
 
     #omega2 - sigma2_re
     if(n_re>0) {
@@ -1015,45 +1031,48 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, s_unique, re_unique,
       }
     }
 
-    #sigma2_re - sigma2_re
-    if(n_re>0) {
+    # sigma2_re - sigma2_re
+    if(n_re > 0) {
+      der_sigma2_re_trace <- list()
+      der.sigma2_re <- list()
+      M2_sigma2_re <- list()
+      der2_Sigma_g_inv_sigma2_re_aux <- list()
+      der2_sigma2_re_trace <- list()
       for(i in 1:n_re) {
-        for(j in i:n_re) {
+        select_col <- sum(n_dim_re[1:i])
+        der2_Sigma_g_inv_sigma2_re_aux[[i]] <- matrix(0, nrow = sum(n_dim_re),
+                                                      ncol = sum(n_dim_re))
+        diag(der2_Sigma_g_inv_sigma2_re_aux[[i]][select_col+1:n_dim_re[i+1],
+                                                 select_col+1:n_dim_re[i+1]]) <-
+          2/sigma2_re[i]^3
+        der_sigma2_re_trace[[i]] <- sum(diag(sigma2_re_trace_aux[[i]]))
+        der.sigma2_re[[i]] <- (-0.5*der_sigma2_re_trace[[i]]-0.5*t(diff.y.tilde)%*%
+                                 M_beta_sigma2_re[[i]]%*%
+                                 diff.y.tilde/(omega2^2))*sigma2_re[i]
+        M2_sigma2_re[[i]] <- Sigma_star_inv%*%(
+          2*der_Sigma_g_inv_sigma2_re_aux[[i]]%*%
+            der_sigma2_re_aux[[i]]-der2_Sigma_g_inv_sigma2_re_aux[[i]])%*%
+          Sigma_star_inv
+        der2_sigma2_re_trace[[i]] <- sum(diag(-sigma2_re_trace_aux[[i]]%*%
+                                                sigma2_re_trace_aux[[i]]))
+        H[ind_sigma2_re[i], ind_sigma2_re[i]] <-as.numeric(
+          der.sigma2_re[[i]]+
+            (-0.5*der2_sigma2_re_trace[[i]]+0.5*t(diff.y.tilde)%*%
+               M2_sigma2_re[[i]]%*%
+               diff.y.tilde/(omega2^2))*sigma2_re[i]^2)
+        if(i < n_re) {
+          for(j in (i+1):n_re) {
 
-          der_sigma2_re_ij_trace <- sum(diag(-sigma2_re_trace_aux[[i]]%*%sigma2_re_trace_aux[[j]]))
+            der_sigma2_re_ij_trace <- sum(diag(-sigma2_re_trace_aux[[i]]%*%
+                                                 sigma2_re_trace_aux[[j]]))
 
+            M2_sigma2_re_ij <- -Sigma_star_inv%*%(
+              -der_Sigma_g_inv_sigma2_re_aux[[i]]%*%der_sigma2_re_aux[[j]]+
+                -der_Sigma_g_inv_sigma2_re_aux[[j]]%*%der_sigma2_re_aux[[i]]
+            )%*%Sigma_star_inv
 
-          der_Sigma_g_inv_sigma2_re_ij_aux <- matrix(0, nrow = sum(n_dim_re),
-                                                     ncol = sum(n_dim_re))
-          if(i==j) {
-            diag(der_Sigma_g_inv_sigma2_re_ij_aux[select_col+1:n_dim_re[i+1],
-                                                  select_col+1:n_dim_re[i+1]])  <-
-              2/sigma2_re[i]^3
-          }
-
-          M2_sigma2_re_ij <- -Sigma_star_inv%*%(
-            der_Sigma_g_inv_sigma2_re_aux[[i]]%*%der_sigma2_re_aux[[j]]+
-              der_Sigma_g_inv_sigma2_re_aux[[j]]%*%der_sigma2_re_aux[[i]]-
-              der_Sigma_g_inv_sigma2_re_ij_aux
-          )%*%Sigma_star_inv
-
-          if(i==j) {
-            der_sigma2_re_trace <- sum(diag(Sigma_tilde_inv%*%
-                                              der_sigma2_re_Sigma_tilde[[i]]))
-            grad_sigma2_re <- as.numeric((-0.5*der_sigma2_re_trace-0.5*
-                                            t(diff.y.tilde)%*%
-                                            der_sigma2_re_aux[[i]]%*%Sigma_star_inv%*%
-                                            diff.y.tilde/(omega2^2))*sigma2_re[i])
-            H[ind_sigma2_re[i], ind_sigma2_re[i]] <-
-              grad_sigma2_re+
-              as.numeric(
-                (-0.5*der_sigma2_re_ij_trace+0.5*t(diff.y.tilde)%*%
-                   M2_sigma2_re_ij%*%
-                   diff.y.tilde/(omega2^2))*sigma2_re[i]^2)
-
-          } else {
-            H[ind_sigma2_re[j], ind_sigma2_re[i]] <-
-              H[ind_sigma2_re[i], ind_sigma2_re[j]] <- as.numeric(
+            H[ind_sigma2_re[i], ind_sigma2_re[j]] <-
+              H[ind_sigma2_re[j], ind_sigma2_re[i]] <- as.numeric(
                 (-0.5*der_sigma2_re_ij_trace+0.5*t(diff.y.tilde)%*%
                    M2_sigma2_re_ij%*%
                    diff.y.tilde/(omega2^2))*sigma2_re[i]*sigma2_re[j])
@@ -1062,9 +1081,9 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, s_unique, re_unique,
       }
     }
 
+
     return(H)
   }
-
 
   start_cov_pars[-(1:2)] <- start_cov_pars[-(1:2)]/start_cov_pars[1]
   start_par <- c(start_beta, log(start_cov_pars))
@@ -1072,6 +1091,7 @@ glgm_lm <- function(y, D, coords, ID_coords, ID_re, s_unique, re_unique,
   estNLMINB <- nlminb(start_par,
                         function(x) -log.lik(x),
                         function(x) -grad.log.lik(x),
+                        function(x) -hessian.log.lik(x),
                         control=list(trace=1*messages))
 
   estim$estimate <- estNLMINB$par
