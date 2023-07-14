@@ -7,7 +7,7 @@
 glgm(
   formula,
   m_offset = NULL,
-  geo_re,
+  geo_re = "GP",
   hr_re = NULL,
   data,
   family,
@@ -15,9 +15,9 @@ glgm(
   scale_to_km = TRUE,
   control_MCMC = NULL,
   kappa = 0.5,
-  start.beta = NULL,
-  start.cov.pars = NULL,
-  method = "BFGS",
+  start_beta = NULL,
+  start_cov_pars = NULL,
+  start_vars.re = NULL,
   messages = TRUE,
   plot_correlogram = TRUE,
   fix_tau2 = NULL
@@ -30,9 +30,7 @@ glgm(
 
 \item{kappa}{fixed value for the shape parameter of the Matern covariance function.}
 
-\item{start.cov.pars}{a vector of length two with elements corresponding to the starting values of \code{phi} and the relative variance of the nugget effect \code{nu2}, respectively, that are used in the optimization algorithm. If \code{nu2} is fixed through \code{fixed.rel.nugget}, then \code{start.cov.pars} represents the starting value for \code{phi} only.}
-
-\item{method}{method of optimization. If \code{method="BFGS"} then the \code{\link{maxBFGS}} function is used; otherwise \code{method="nlminb"} to use the \code{\link{nlminb}} function. Default is \code{method="BFGS"}.}
+\item{start_cov_pars}{a vector of length two with elements corresponding to the starting values of \code{phi} and the relative variance of the nugget effect \code{nu2}, respectively, that are used in the optimization algorithm. If \code{nu2} is fixed through \code{fixed.rel.nugget}, then \code{start_cov_pars} represents the starting value for \code{phi} only.}
 
 \item{messages}{logical; if \code{messages=TRUE} then status messages are printed on the screen (or output device) while the function is running. Default is \code{messages=TRUE}.}
 
@@ -42,7 +40,7 @@ glgm(
 
 \item{times}{an object of class \code{\link{formula}} indicating the times in the data, used in the spatio-temporal model.}
 
-\item{ID.coords}{vector of ID values for the unique set of spatial coordinates obtained from \code{\link{create.ID.coords}}. These must be provided if, for example, spatial random effects are defined at household level but some of the covariates are at individual level. \bold{Warning}: the household coordinates must all be distinct otherwise see \code{jitterDupCoords}. Default is \code{NULL}.}
+\item{ID_coords}{vector of ID values for the unique set of spatial coordinates obtained from \code{\link{create.ID_coords}}. These must be provided if, for example, spatial random effects are defined at household level but some of the covariates are at individual level. \bold{Warning}: the household coordinates must all be distinct otherwise see \code{jitterDupCoords}. Default is \code{NULL}.}
 
 \item{par0}{parameters of the importance sampling distribution: these should be given in the following order \code{c(beta,sigma2,phi,tau2)}, where \code{beta} are the regression coefficients, \code{sigma2} is the variance of the Gaussian process, \code{phi} is the scale parameter of the spatial correlation and \code{tau2} is the variance of the nugget effect (if included in the model).}
 
@@ -58,6 +56,8 @@ glgm(
 Deafault is \code{sst.model=NULL}, which is used when a purely spatial model is fitted.}
 
 \item{fixed.rel.nugget}{fixed value for the relative variance of the nugget effect; \code{fixed.rel.nugget=NULL} if this should be included in the estimation. Default is \code{fixed.rel.nugget=NULL}.}
+
+\item{method}{method of optimization. If \code{method="BFGS"} then the \code{\link{maxBFGS}} function is used; otherwise \code{method="nlminb"} to use the \code{\link{nlminb}} function. Default is \code{method="BFGS"}.}
 
 \item{low.rank}{logical; if \code{low.rank=TRUE} a low-rank approximation of the Gaussian spatial process is used when fitting the model. Default is \code{low.rank=FALSE}.}
 
@@ -90,7 +90,7 @@ The object is a list with the following components:
 
 \code{method}: method of optimization used.
 
-\code{ID.coords}: set of ID values defined through the argument \code{ID.coords}.
+\code{ID_coords}: set of ID values defined through the argument \code{ID_coords}.
 
 \code{kappa}: fixed value of the shape parameter of the Matern function.
 
@@ -138,7 +138,7 @@ Christensen, O. F. (2004). \emph{Monte carlo maximum likelihood in model-based g
 Higdon, D. (1998). \emph{A process-convolution approach to modeling temperatures in the North Atlantic Ocean.} Environmental and Ecological Statistics 5, 173-190.
 }
 \seealso{
-\code{\link{Laplace.sampling}}, \code{\link{Laplace.sampling.lr}}, \code{\link{summary.PrevMap}}, \code{\link{coef.PrevMap}}, \code{matern}, \code{\link{matern.kernel}},  \code{\link{control.mcmc.MCML}}, \code{\link{create.ID.coords}}.
+\code{\link{Laplace.sampling}}, \code{\link{Laplace.sampling.lr}}, \code{\link{summary.PrevMap}}, \code{\link{coef.PrevMap}}, \code{matern}, \code{\link{matern.kernel}},  \code{\link{control.mcmc.MCML}}, \code{\link{create.ID_coords}}.
 }
 \author{
 Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}

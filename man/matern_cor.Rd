@@ -7,7 +7,7 @@
 matern_cor(u, phi, kappa, return_sym_matrix = FALSE)
 }
 \arguments{
-\item{u}{a vectorwith values of the distances between pairs of data locations}
+\item{u}{a vector with values of the distances between pairs of data locations}
 
 \item{phi}{value of the scale parameter \eqn{\phi}.}
 
