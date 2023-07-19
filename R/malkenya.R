@@ -21,14 +21,15 @@
 ##'  residual spraying (IRS) in the house in the last 12 months: 1, if yes, 0,
 ##'  if no.
 ##'  \item Travel:  binary variable indicating whether the sampled individual
-##'  has travelled outside the village in the last three months: 1, if yes, 0,
+##'  has traveled outside the village in the last three months: 1, if yes, 0,
 ##'  if no.
 ##'  \item SES: ordinal variable indicating the socio-economic status (SES) of
 ##'   the household. The variables is an integer score from 1(=poor) to 5(=rich).
 ##'  \item District: factor variable indicating the village of the sampled
 ##'  individual, "Kisii Central" or "Rachuonyo".
-##'  \item Survey: factor variables indicating the survey in which the
+##'  \item Survey: factor variable indicating the survey in which the
 ##'  participant was enrolled, "community" or "school".
+##'  \item elevation: elevation, in meters, of the recorded household location
 ##' }
 ##' @docType data
 ##' @keywords datasets
