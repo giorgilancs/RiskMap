@@ -82,3 +82,12 @@ glgm <- function(formula,
                  save_samples = F,
                  messages = TRUE) 
 ```
+My solution to incorporate "gp" into the formula
+
+``` r
+(tf <- terms(y ~ x + x:z + gp(kappa = 0.5, nugget = TRUE)+w, specials = "gp"))
+attr(tf, "specials")    # index 's' variable(s)
+gp <- rownames(attr(tf, "factors"))[[attr(tf, "specials")$gp]]
+gp_list <- eval(parse(text = gsub("gp","list",gp)))
+gp_list
+```
