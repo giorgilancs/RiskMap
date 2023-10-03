@@ -1,4 +1,3 @@
-
 ##' @title Monte Carlo Maximum Likelihood estimation for the binomial logistic model
 ##' @description This function performs Monte Carlo maximum likelihood (MCML) estimation for the geostatistical binomial logistic model.
 ##' @param formula an object of class \code{\link{formula}} (or one that can be coerced to that class): a symbolic description of the model to be fitted.
@@ -70,21 +69,16 @@
 ##' @author Peter J. Diggle \email{p.diggle@@lancaster.ac.uk}
 ##' @export
 glgm <- function(formula,
-                 m_offset = NULL,
-                 geo_re = "GP",
-                 hr_re = NULL,
                  data,
                  family,
+                 distr_offset = NULL,
+                 cov_offset = NULL,
                  convert_to_crs = NULL,
                  scale_to_km = TRUE,
                  control_MCMC = NULL,
-                 kappa = 0.5,
-                 start_beta = NULL,
-                 start_cov_pars = NULL,
-                 start_vars.re = NULL,
-                 messages = TRUE,
-                 plot_correlogram = TRUE,
-                 fix_tau2 = NULL) {
+                 S_samples = NULL,
+                 save_samples = F,
+                 messages = TRUE) {
 
   if(family=="binomial" | family=="poisson") {
     if(is.null(control_MCMC)) stop("if family='binomial' or family='poisson'
@@ -100,21 +94,13 @@ glgm <- function(formula,
   if(is.na(st_crs(data))) stop("the CRS of the data is missing
                                and must be specified; see ?st_crs")
 
-  if(!is.null(hr_re)) {
-    if(class(hr_re)!="formula") stop("the object 'he_re' must be a 'formula' object")
-  }
-
-  if(family=="Binomial") {
+  if(family=="binomial") {
     if(is.null(m_offset)) stop("if family='binomial', the argument 'm_offset'
                                must be provided")
     m_offset_ch <- as.charaster(as.name(subsitute(m_offset)))
   }
 
   if(kappa < 0) stop("kappa must be positive.")
-
-
-  if(geo_re != "GP" & geo_re != "GP+NUG") stop("'geo_re' must be 'GP' or
-                                               'GP+NUG'")
 
   if(family != "gaussian" & method != "binomial" &
      family != "poisson") stop("'family' must be either 'gaussian', 'binomial'

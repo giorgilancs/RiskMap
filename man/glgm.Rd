@@ -6,31 +6,23 @@
 \usage{
 glgm(
   formula,
-  m_offset = NULL,
-  geo_re = "GP",
-  hr_re = NULL,
   data,
   family,
+  distr_offset = NULL,
+  cov_offset = NULL,
   convert_to_crs = NULL,
   scale_to_km = TRUE,
   control_MCMC = NULL,
-  kappa = 0.5,
-  start_beta = NULL,
-  start_cov_pars = NULL,
-  start_vars.re = NULL,
-  messages = TRUE,
-  plot_correlogram = TRUE,
-  fix_tau2 = NULL
+  S_samples = NULL,
+  save_samples = F,
+  messages = TRUE
+
 )
 }
 \arguments{
 \item{formula}{an object of class \code{\link{formula}} (or one that can be coerced to that class): a symbolic description of the model to be fitted.}
 
 \item{data}{a data frame containing the variables in the model.}
-
-\item{kappa}{fixed value for the shape parameter of the Matern covariance function.}
-
-\item{start_cov_pars}{a vector of length two with elements corresponding to the starting values of \code{phi} and the relative variance of the nugget effect \code{nu2}, respectively, that are used in the optimization algorithm. If \code{nu2} is fixed through \code{fixed.rel.nugget}, then \code{start_cov_pars} represents the starting value for \code{phi} only.}
 
 \item{messages}{logical; if \code{messages=TRUE} then status messages are printed on the screen (or output device) while the function is running. Default is \code{messages=TRUE}.}
 
@@ -45,6 +37,8 @@ glgm(
 \item{par0}{parameters of the importance sampling distribution: these should be given in the following order \code{c(beta,sigma2,phi,tau2)}, where \code{beta} are the regression coefficients, \code{sigma2} is the variance of the Gaussian process, \code{phi} is the scale parameter of the spatial correlation and \code{tau2} is the variance of the nugget effect (if included in the model).}
 
 \item{control.mcmc}{output from \code{\link{control.mcmc.MCML}}.}
+
+\item{kappa}{fixed value for the shape parameter of the Matern covariance function.}
 
 \item{kappa.t}{fixed value for the shape parameter of the Matern covariance function in the separable double-Matern spatio-temporal model.}
 

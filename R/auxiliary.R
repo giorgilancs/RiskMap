@@ -161,3 +161,97 @@ matern.hessian.phi <- function(U,phi,kappa) {
   hess.phi.mat
 }
 
+gp <- function (..., kappa = 0.5, nugget = T)
+{
+  vars <- as.list(substitute(list(...)))[-1]
+  d <- length(vars)
+  term <- NULL
+  if (d == 0) {
+    term <- "sf"
+  } else {
+    if (d > 0) {
+      for (i in 1:d) {
+        term[i] <- deparse(vars[[i]], backtick = TRUE, width.cutoff = 500)
+      }
+    }
+    for (i in 1:d) term[i] <- attr(terms(reformulate(term[i])),
+                                   "term.labels")
+  }
+  full.call <- paste("gp(", term[1], sep = "")
+  if (d > 1)
+    for (i in 2:d) full.call <- paste(full.call, ",", term[i],
+                                      sep = "")
+  label <- gsub("sf", "", paste(full.call, ")", sep = ""))
+  ret <- list(term = term, kappa = kappa, nugget = nugget, dim = d,
+              label = label)
+  class(ret) <- "gp.spec"
+  ret
+}
+
+re <- function (...)
+{
+  vars <- as.list(substitute(list(...)))[-1]
+  d <- length(vars)
+  term <- NULL
+  if (d == 0) {
+    stop("You need to provide at least one variable.")
+  } else {
+    if (d > 0) {
+      for (i in 1:d) {
+        term[i] <- deparse(vars[[i]], backtick = TRUE, width.cutoff = 500)
+      }
+    }
+    for (i in 1:d) term[i] <- attr(terms(reformulate(term[i])),
+                                   "term.labels")
+  }
+  full.call <- paste("re(", term[1], sep = "")
+  if (d > 1)
+    for (i in 2:d) full.call <- paste(full.call, ",", term[i],
+                                      sep = "")
+  label <- gsub("sf", "", paste(full.call, ")", sep = ""))
+  ret <- list(term = term, dim = d, label = label)
+  class(ret) <- "re.spec"
+  ret
+}
+
+interpret.formula <- function(formula) {
+  p.env <- environment(formula)
+  tf <- terms.formula(formula, specials = c("gp", "re"))
+  terms <- attr(tf, "term.labels")
+  nt <- length(terms)
+  if (attr(tf, "response") > 0) {
+    response <- as.character(attr(tf, "variables")[2])
+  } else {
+    response <- NULL
+  }
+  gp <- attr(tf, "specials")$gp
+  re <- attr(tf, "specials")$re
+  off <- attr(tf, "offset")
+  vtab <- attr(tf, "factors")
+  if (length(gp) > 0)
+    for (i in 1:length(gp)) {
+      ind <- (1:nt)[as.logical(vtab[gp[i],])]
+      gp[i] <- ind
+    }
+  if (length(re) > 0)
+    for (i in 1:length(re)) {
+      ind <- (1:nt)[as.logical(vtab[re[i],])]
+      re[i] <- ind
+    }
+  len.gp <- length(gp)
+  len.re <- length(re)
+  ns <- len.gp + len.re
+  gp.spec <- eval(parse(text = terms[gp]), envir = p.env)
+  re.spec <- eval(parse(text = terms[re]), envir = p.env)
+  pf <- paste(response, "~", paste(terms[-c(gp, re)], collapse = " + "))
+  if (attr(tf, "intercept") == 0) {
+    pf <- paste(pf, "-1", sep = "")
+  }
+  fake.formula <- pf
+  fake.formula <- as.formula(fake.formula, p.env)
+  ret <- list(pf = as.formula(pf, p.env),
+              gp.spec = gp.spec,
+              re.spec = re.spec,
+              response = response)
+  ret
+}
