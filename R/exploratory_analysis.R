@@ -1,3 +1,45 @@
+##' @title Summaries of the distances
+##' @description
+##' Computes the distances between the locations in the data-set and returns summary statistics of these.
+##'
+##' @param data an object of class \code{sf} containing the variable for which the variogram
+##' is to be computed and the coordinates
+##' @param convert_to_utm a logical value, indicating if the conversion to UTM shuold be performed (\code{convert_to_utm = TRUE}) or
+##' the coordinate reference system of the data must be used without any conversion (\code{convert_to_utm = FALSE}).
+##' By default \code{convert_to_utm = TRUE}. Note: if \code{convert_to_utm = TRUE} the conversion to UTM is performed using
+##' the epsg provided by \code{\link{propose_utm}}.
+##' @param scale_to_km a logical value, indicating if the distances used in the variogram must be scaled
+##' to kilometers (\code{scale_to_km = TRUE}) or left in meters (\code{scale_to_km = FALSE}).
+##' By default \code{scale_to_km = FALSE}
+##'
+##' @return a list containing the following components
+##' @return \code{min} the minimum distance
+##' @return \code{max} the maximum distance
+##' @return \code{mean} the mean distance
+##' @return \code{median} the minimum distance
+dist_summaries <- function(data,
+                        convert_to_utm = TRUE,
+                        scale_to_km = FALSE) {
+
+  if(class(data)[1]!="sf") stop("'data' must be an object of class 'sf'")
+
+  if(!convert_to_utm) cat("The distances of the variogram are computed assuming
+                          that the CRS of the data gives distances in meters or kilometers")
+  data <- st_transform(data, crs = 4326)
+  data <- st_transform(data, crs = propose_utm(data))
+  coords <- st_coordinates(data)
+  d <- as.numeric(dist(coords))
+  if(scale_to_km) d <- d/1000
+
+  out <- list()
+  out$min <- min(d)
+  out$max <- max(d)
+  out$mean <- mean(d)
+  out$median <- median(d)
+
+  return(out)
+}
+
 
 ##' @title Empirical variogram
 ##' @description Computes the empirical variogram using ``bins'' of distance provided by the user.

@@ -16,6 +16,7 @@ glgm(
   S_samples = NULL,
   save_samples = F,
   messages = TRUE
+
 )
 }
 \arguments{
@@ -49,8 +50,6 @@ glgm(
 Deafault is \code{sst.model=NULL}, which is used when a purely spatial model is fitted.}
 
 \item{fixed.rel.nugget}{fixed value for the relative variance of the nugget effect; \code{fixed.rel.nugget=NULL} if this should be included in the estimation. Default is \code{fixed.rel.nugget=NULL}.}
-
-\item{start_cov_pars}{a vector of length two with elements corresponding to the starting values of \code{phi} and the relative variance of the nugget effect \code{nu2}, respectively, that are used in the optimization algorithm. If \code{nu2} is fixed through \code{fixed.rel.nugget}, then \code{start_cov_pars} represents the starting value for \code{phi} only.}
 
 \item{method}{method of optimization. If \code{method="BFGS"} then the \code{\link{maxBFGS}} function is used; otherwise \code{method="nlminb"} to use the \code{\link{nlminb}} function. Default is \code{method="BFGS"}.}
 
