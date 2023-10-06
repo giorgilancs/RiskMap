@@ -161,11 +161,23 @@ matern.hessian.phi <- function(U,phi,kappa) {
   hess.phi.mat
 }
 
-gp <- function (..., kappa = 0.5, nugget = T)
-{
+
+gp <- function (..., kappa = 0.5, nugget = NULL, crs = NULL) {
   vars <- as.list(substitute(list(...)))[-1]
   d <- length(vars)
   term <- NULL
+
+  if(length(nugget) > 0) {
+    if(!is.numeric(nugget) |
+       (is.numeric(nugget) & nugget <0)) stop("when 'nugget' is not NULL, this must be a positive
+                                 real number")
+  }
+  if(length(crs)>0) {
+    if(!is.numeric(crs) |
+       (is.numeric(crs) &
+        (crs%%1!=0 | crs <0))) stop("'crs' must be a positive integer number")
+  }
+
   if (d == 0) {
     term <- "sf"
   } else {
@@ -173,7 +185,12 @@ gp <- function (..., kappa = 0.5, nugget = T)
       for (i in 1:d) {
         term[i] <- deparse(vars[[i]], backtick = TRUE, width.cutoff = 500)
       }
+      if(is.null(crs)) {
+        warning("'crs' is set to 4326 (long/lat)")
+        crs <- 4326
+      }
     }
+
     for (i in 1:d) term[i] <- attr(terms(reformulate(term[i])),
                                    "term.labels")
   }
@@ -182,7 +199,7 @@ gp <- function (..., kappa = 0.5, nugget = T)
     for (i in 2:d) full.call <- paste(full.call, ",", term[i],
                                       sep = "")
   label <- gsub("sf", "", paste(full.call, ")", sep = ""))
-  ret <- list(term = term, kappa = kappa, nugget = nugget, dim = d,
+  ret <- list(term = term, kappa = kappa, nugget = nugget, dim = d, crs=crs,
               label = label)
   class(ret) <- "gp.spec"
   ret
@@ -243,10 +260,15 @@ interpret.formula <- function(formula) {
   ns <- len.gp + len.re
   gp.spec <- eval(parse(text = terms[gp]), envir = p.env)
   re.spec <- eval(parse(text = terms[re]), envir = p.env)
-  pf <- paste(response, "~", paste(terms[-c(gp, re)], collapse = " + "))
+  if(length(terms[-c(gp, re)])>0) {
+    pf <- paste(response, "~", paste(terms[-c(gp, re)], collapse = " + "))
+  } else if (length(terms[-c(gp, re)])==0) {
+    pf <- paste(response, "~ 1")
+  }
   if (attr(tf, "intercept") == 0) {
     pf <- paste(pf, "-1", sep = "")
   }
+
   fake.formula <- pf
   fake.formula <- as.formula(fake.formula, p.env)
   ret <- list(pf = as.formula(pf, p.env),
