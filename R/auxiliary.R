@@ -161,7 +161,6 @@ matern.hessian.phi <- function(U,phi,kappa) {
   hess.phi.mat
 }
 
-
 gp <- function (..., kappa = 0.5, nugget = NULL, crs = NULL) {
   vars <- as.list(substitute(list(...)))[-1]
   d <- length(vars)

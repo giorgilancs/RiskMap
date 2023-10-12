@@ -1,71 +1,6 @@
-##' @title Monte Carlo Maximum Likelihood estimation for the binomial logistic model
-##' @description This function performs Monte Carlo maximum likelihood (MCML) estimation for the geostatistical binomial logistic model.
-##' @param formula an object of class \code{\link{formula}} (or one that can be coerced to that class): a symbolic description of the model to be fitted.
-##' @param units.m an object of class \code{\link{formula}} indicating the binomial denominators in the data.
-##' @param coords an object of class \code{\link{formula}} indicating the spatial coordinates in the data.
-##' @param times an object of class \code{\link{formula}} indicating the times in the data, used in the spatio-temporal model.
-##' @param data a data frame containing the variables in the model.
-##' @param ID_coords vector of ID values for the unique set of spatial coordinates obtained from \code{\link{create.ID_coords}}. These must be provided if, for example, spatial random effects are defined at household level but some of the covariates are at individual level. \bold{Warning}: the household coordinates must all be distinct otherwise see \code{jitterDupCoords}. Default is \code{NULL}.
-##' @param par0 parameters of the importance sampling distribution: these should be given in the following order \code{c(beta,sigma2,phi,tau2)}, where \code{beta} are the regression coefficients, \code{sigma2} is the variance of the Gaussian process, \code{phi} is the scale parameter of the spatial correlation and \code{tau2} is the variance of the nugget effect (if included in the model).
-##' @param control.mcmc output from \code{\link{control.mcmc.MCML}}.
-##' @param kappa fixed value for the shape parameter of the Matern covariance function.
-##' @param kappa.t fixed value for the shape parameter of the Matern covariance function in the separable double-Matern spatio-temporal model.
-##' @param sst.model a character value that specifies the spatio-temporal correlation function.
-##' \itemize{
-##' \item \code{sst.model="DM"} separable double-Matern.
-##' \item \code{sst.model="GN1"} separable correlation functions. Temporal correlation: \eqn{f(x) = 1/(1+x/\psi)}; Spatial correaltion: Matern function.
-##' }
-##' Deafault is \code{sst.model=NULL}, which is used when a purely spatial model is fitted.
-##' @param fixed.rel.nugget fixed value for the relative variance of the nugget effect; \code{fixed.rel.nugget=NULL} if this should be included in the estimation. Default is \code{fixed.rel.nugget=NULL}.
-##' @param start_cov_pars a vector of length two with elements corresponding to the starting values of \code{phi} and the relative variance of the nugget effect \code{nu2}, respectively, that are used in the optimization algorithm. If \code{nu2} is fixed through \code{fixed.rel.nugget}, then \code{start_cov_pars} represents the starting value for \code{phi} only.
-##' @param low.rank logical; if \code{low.rank=TRUE} a low-rank approximation of the Gaussian spatial process is used when fitting the model. Default is \code{low.rank=FALSE}.
-##' @param SPDE logical; if \code{SPDE=TRUE} the SPDE approximation for the Gaussian spatial model is used. Default is \code{SPDE=FALSE}.
-##' @param knots if \code{low.rank=TRUE}, \code{knots} is a matrix of spatial knots that are used in the low-rank approximation. Default is \code{knots=NULL}.
-##' @param mesh an object obtained as result of a call to the function \code{inla.mesh.2d}.
-##' @param messages logical; if \code{messages=TRUE} then status messages are printed on the screen (or output device) while the function is running. Default is \code{messages=TRUE}.
-##' @param plot.correlogram logical; if \code{plot.correlogram=TRUE} the autocorrelation plot of the samples of the random effect is displayed after completion of conditional simulation. Default is \code{plot.correlogram=TRUE}.
-##' @details
-##' This function performs parameter estimation for a geostatistical binomial logistic model. Conditionally on a zero-mean stationary Gaussian process \eqn{S(x)} and mutually independent zero-mean Gaussian variables \eqn{Z} with variance \code{tau2}, the observations \code{y} are generated from a binomial distribution with probability \eqn{p} and binomial denominators \code{units.m}. A canonical logistic link is used, thus the linear predictor assumes the form
-##' \deqn{\log(p/(1-p)) = d'\beta + S(x) + Z,}
-##' where \eqn{d} is a vector of covariates with associated regression coefficients \eqn{\beta}. The Gaussian process \eqn{S(x)} has isotropic Matern covariance function (see \code{matern}) with variance \code{sigma2}, scale parameter \code{phi} and shape parameter \code{kappa}.
-##' In the \code{binomial.logistic.MCML} function, the shape parameter is treated as fixed. The relative variance of the nugget effect, \code{nu2=tau2/sigma2}, can also be fixed through the argument \code{fixed.rel.nugget}; if \code{fixed.rel.nugget=NULL}, then the relative variance of the nugget effect is also included in the estimation.
-##'
-##' \bold{Monte Carlo Maximum likelihood.}
-##' The Monte Carlo maximum likelihood method uses conditional simulation from the distribution of the random effect \eqn{T(x) = d(x)'\beta+S(x)+Z} given the data \code{y}, in order to approximate the high-dimensiional intractable integral given by the likelihood function. The resulting approximation of the likelihood is then maximized by a numerical optimization algorithm which uses analytic epression for computation of the gradient vector and Hessian matrix. The functions used for numerical optimization are \code{\link{maxBFGS}} (\code{method="BFGS"}), from the \pkg{maxLik} package, and \code{\link{nlminb}} (\code{method="nlminb"}).
-##'
-##' \bold{Using a two-level model to include household-level and individual-level information.}
-##' When analysing data from household sruveys, some of the avilable information information might be at household-level (e.g. material of house, temperature) and some at individual-level (e.g. age, gender). In this case, the Gaussian spatial process \eqn{S(x)} and the nugget effect \eqn{Z} are defined at hosuehold-level in order to account for extra-binomial variation between and within households, respectively.
-##'
-##' \bold{Low-rank approximation.}
-##' In the case of very large spatial data-sets, a low-rank approximation of the Gaussian spatial process \eqn{S(x)} might be computationally beneficial. Let \eqn{(x_{1},\dots,x_{m})} and \eqn{(t_{1},\dots,t_{m})} denote the set of sampling locations and a grid of spatial knots covering the area of interest, respectively. Then \eqn{S(x)} is approximated as \eqn{\sum_{i=1}^m K(\|x-t_{i}\|; \phi, \kappa)U_{i}}, where \eqn{U_{i}} are zero-mean mutually independent Gaussian variables with variance \code{sigma2} and \eqn{K(.;\phi, \kappa)} is the isotropic Matern kernel (see \code{\link{matern.kernel}}). Since the resulting approximation is no longer a stationary process (but only approximately), the parameter \code{sigma2} is then multiplied by a factor \code{constant.sigma2} so as to obtain a value that is closer to the actual variance of \eqn{S(x)}.
-##' @return An object of class "PrevMap".
-##' The function \code{\link{summary.PrevMap}} is used to print a summary of the fitted model.
-##' The object is a list with the following components:
-##' @return \code{estimate}: estimates of the model parameters; use the function \code{\link{coef.PrevMap}} to obtain estimates of covariance parameters on the original scale.
-##' @return \code{covariance}: covariance matrix of the MCML estimates.
-##' @return \code{log.lik}: maximum value of the log-likelihood.
-##' @return \code{y}: binomial observations.
-##' @return \code{units.m}: binomial denominators.
-##' @return \code{D}: matrix of covariates.
-##' @return \code{coords}: matrix of the observed sampling locations.
-##' @return \code{method}: method of optimization used.
-##' @return \code{ID_coords}: set of ID values defined through the argument \code{ID_coords}.
-##' @return \code{kappa}: fixed value of the shape parameter of the Matern function.
-##' @return \code{kappa.t}: fixed value for the shape parameter of the Matern covariance function in the separable double-Matern spatio-temporal model.
-##' @return \code{knots}: matrix of the spatial knots used in the low-rank approximation.
-##' @return \code{mesh}: the mesh used in the SPDE approximation.
-##' @return \code{const.sigma2}: adjustment factor for \code{sigma2} in the low-rank approximation.
-##' @return \code{h}: vector of the values of the tuning parameter at each iteration of the Langevin-Hastings MCMC algorithm; see \code{\link{Laplace.sampling}}, or \code{\link{Laplace.sampling.lr}} if a low-rank approximation is used.
-##' @return \code{samples}: matrix of the random effects samples from the importance sampling distribution used to approximate the likelihood function.
-##' @return \code{fixed.rel.nugget}: fixed value for the relative variance of the nugget effect.
-##' @return \code{call}: the matched call.
-##' @seealso \code{\link{Laplace.sampling}}, \code{\link{Laplace.sampling.lr}}, \code{\link{summary.PrevMap}}, \code{\link{coef.PrevMap}}, \code{matern}, \code{\link{matern.kernel}},  \code{\link{control.mcmc.MCML}}, \code{\link{create.ID_coords}}.
-##' @references Diggle, P.J., Giorgi, E. (2019). \emph{Model-based Geostatistics for Global Public Health.} CRC/Chapman & Hall.
-##' @references Giorgi, E., Diggle, P.J. (2017). \emph{PrevMap: an R package for prevalence mapping.} Journal of Statistical Software. 78(8), 1-29. doi: 10.18637/jss.v078.i08
-##' @references Christensen, O. F. (2004). \emph{Monte carlo maximum likelihood in model-based geostatistics.} Journal of Computational and Graphical Statistics 13, 702-718.
-##' @references Higdon, D. (1998). \emph{A process-convolution approach to modeling temperatures in the North Atlantic Ocean.} Environmental and Ecological Statistics 5, 173-190.
+##' @title Estimation of Generalized Linear Geostatitsical Models
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @author Peter J. Diggle \email{p.diggle@@lancaster.ac.uk}
+##' @importFrom sf st_crs st_as_sf st_drop_geometry
 ##' @export
 glgm <- function(formula,
                  data,
@@ -132,7 +67,7 @@ glgm <- function(formula,
                                or 'poisson'")
 
 
-  mf <- model.frame(inter_f$pf,data=data)
+  mf <- model.frame(inter_f$pf,data=data, na.action = na.fail)
 
   # Extract outcome data
   y <- as.numeric(model.response(mf))
@@ -151,6 +86,7 @@ glgm <- function(formula,
   if(!is.null(hr_re)) {
     # Define indices of random effects
     re_mf <- st_drop_geometry(data[hr_re])
+    if(any(is.na(re_mf))) stop("Missing values in the variable(s) of the random effects specified through re() ")
     names_re <- colnames(re_mf)
     n_re <- ncol(re_mf)
 
@@ -347,9 +283,9 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
       nu2 <- fix_tau2/sigma2
     } else {
       nu2 <- exp(par[ind_nu2])
-      if(n_re>0) {
-        sigma2_re <- exp(par[ind_sigma2_re])
-      }
+    }
+    if(n_re>0) {
+      sigma2_re <- exp(par[ind_sigma2_re])
     }
 
     if(!is.null(fix_sigma2_me)) {
@@ -406,15 +342,15 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
 
   grad.log.lik <- function(par) {
     beta <- par[ind_beta]
-    sigma2 <- exp(par[p+1])
+    sigma2 <- exp(par[ind_sigma2])
     phi <- exp(par[ind_phi])
     if(!is.null(fix_tau2)) {
       nu2 <- fix_tau2/sigma2
     } else {
       nu2 <- exp(par[ind_nu2])
-      if(n_re>0) {
-        sigma2_re <- exp(par[ind_sigma2_re])
-      }
+    }
+    if(n_re>0) {
+      sigma2_re <- exp(par[ind_sigma2_re])
     }
     if(!is.null(fix_sigma2_me)) {
       omega2 <- fix_sigma2_me
@@ -458,7 +394,7 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
     M_aux <- D.tilde%*%Sigma_star_inv
 
 
-    g[1:p] <- t(D)%*%diff.y/omega2-M_aux%*%diff.y.tilde/(omega2^2)
+    g[ind_beta] <- t(D)%*%diff.y/omega2-M_aux%*%diff.y.tilde/(omega2^2)
 
     der_Sigma_g_inv_sigma2 <- matrix(0, nrow = sum(n_dim_re),
                                      ncol = sum(n_dim_re))
@@ -474,7 +410,7 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
     der_sigma2_Sigma_g[1:n_dim_re[1], 1:n_dim_re[1]] <- R
     der_sigma2_Sigma_g <- der_sigma2_Sigma_g%*%C_g_m/omega2
     der_sigma2_trace <- sum(Matrix::diag(Sigma_tilde_inv%*%der_sigma2_Sigma_g))
-    g[p+1] <- (-0.5*der_sigma2_trace-0.5*t(diff.y.tilde)%*%
+    g[ind_sigma2] <- (-0.5*der_sigma2_trace-0.5*t(diff.y.tilde)%*%
                       der_sigma2_aux%*%Sigma_star_inv%*%
               diff.y.tilde/(omega2^2))*sigma2
 
@@ -551,7 +487,7 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
                                         select_col+1:n_dim_re[i+1]]) <- 1
         der_sigma2_re_Sigma_tilde[[i]] <- der_sigma2_re_Sigma_g[[i]]%*%C_g_m/omega2
         sigma2_re_trace_aux[[i]] <- Sigma_tilde_inv%*%der_sigma2_re_Sigma_tilde[[i]]
-        der_sigma2_re_trace[[i]] <- sum(diag(sigma2_re_trace_aux[[i]]))
+        der_sigma2_re_trace[[i]] <- sum(Matrix::diag(sigma2_re_trace_aux[[i]]))
         g[ind_sigma2_re[i]] <- (-0.5*der_sigma2_re_trace[[i]]-0.5*t(diff.y.tilde)%*%
                                  M_beta_sigma2_re[[i]]%*%
                                  diff.y.tilde/(omega2^2))*sigma2_re[i]
@@ -573,9 +509,9 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
       nu2 <- fix_tau2/sigma2
     } else {
       nu2 <- exp(par[ind_nu2])
-      if(n_re>0) {
-        sigma2_re <- exp(par[ind_sigma2_re])
-      }
+    }
+    if(n_re>0) {
+      sigma2_re <- exp(par[ind_sigma2_re])
     }
     if(!is.null(fix_sigma2_me)) {
       omega2 <- fix_sigma2_me
@@ -835,8 +771,7 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
                                         select_col+1:n_dim_re[i+1]]) <- 1
         der_sigma2_re_Sigma_tilde[[i]] <- der_sigma2_re_Sigma_g[[i]]%*%C_g_m/omega2
         sigma2_re_trace_aux[[i]] <- Sigma_tilde_inv%*%der_sigma2_re_Sigma_tilde[[i]]
-        der_sigma2_sigma2_re_trace <- sum(diag(-
-                                                 sigma2_trace_aux%*%sigma2_re_trace_aux[[i]]))
+        der_sigma2_sigma2_re_trace <- sum(Matrix::diag(-sigma2_trace_aux%*%sigma2_re_trace_aux[[i]]))
 
         M2_sigma2_sigma2_re <- -Sigma_star_inv%*%(
           -der_Sigma_g_inv_sigma2_aux%*%der_sigma2_re_aux[[i]]+
@@ -928,7 +863,7 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
     #phi - sigma2_re
     if(n_re>0) {
       for(i in 1:n_re) {
-        der_phi_sigma2_re_trace <- sum(diag(-phi_trace_aux%*%sigma2_re_trace_aux[[i]]))
+        der_phi_sigma2_re_trace <- sum(Matrix::diag(-phi_trace_aux%*%sigma2_re_trace_aux[[i]]))
 
         M2_phi_sigma2_re <- -Sigma_star_inv%*%(
           -der_Sigma_g_inv_phi_aux%*%der_sigma2_re_aux[[i]]+
@@ -989,7 +924,7 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
       #nu2 - sigma2_re
       if(n_re>0) {
         for(i in 1:n_re) {
-          der_nu2_sigma2_re_trace <- sum(diag(-nu2_trace_aux%*%sigma2_re_trace_aux[[i]]))
+          der_nu2_sigma2_re_trace <- sum(Matrix::diag(-nu2_trace_aux%*%sigma2_re_trace_aux[[i]]))
 
           M2_nu2_sigma2_re <- -Sigma_star_inv%*%(
             -der_Sigma_g_inv_nu2_aux%*%der_sigma2_re_aux[[i]]+
@@ -1086,7 +1021,7 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
         diag(der2_Sigma_g_inv_sigma2_re_aux[[i]][select_col+1:n_dim_re[i+1],
                                                  select_col+1:n_dim_re[i+1]]) <-
           2/sigma2_re[i]^3
-        der_sigma2_re_trace[[i]] <- sum(diag(sigma2_re_trace_aux[[i]]))
+        der_sigma2_re_trace[[i]] <- sum(Matrix::diag(sigma2_re_trace_aux[[i]]))
         der.sigma2_re[[i]] <- (-0.5*der_sigma2_re_trace[[i]]-0.5*t(diff.y.tilde)%*%
                                  M_beta_sigma2_re[[i]]%*%
                                  diff.y.tilde/(omega2^2))*sigma2_re[i]
@@ -1094,7 +1029,7 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
           2*der_Sigma_g_inv_sigma2_re_aux[[i]]%*%
             der_sigma2_re_aux[[i]]-der2_Sigma_g_inv_sigma2_re_aux[[i]])%*%
           Sigma_star_inv
-        der2_sigma2_re_trace[[i]] <- sum(diag(-sigma2_re_trace_aux[[i]]%*%
+        der2_sigma2_re_trace[[i]] <- sum(Matrix::diag(-sigma2_re_trace_aux[[i]]%*%
                                                 sigma2_re_trace_aux[[i]]))
         H[ind_sigma2_re[i], ind_sigma2_re[i]] <-as.numeric(
           der.sigma2_re[[i]]+
@@ -1104,7 +1039,7 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
         if(i < n_re) {
           for(j in (i+1):n_re) {
 
-            der_sigma2_re_ij_trace <- sum(diag(-sigma2_re_trace_aux[[i]]%*%
+            der_sigma2_re_ij_trace <- sum(Matrix::diag(-sigma2_re_trace_aux[[i]]%*%
                                                  sigma2_re_trace_aux[[j]]))
 
             M2_sigma2_re_ij <- -Sigma_star_inv%*%(
@@ -1129,23 +1064,171 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
   start_cov_pars[-(1:2)] <- start_cov_pars[-(1:2)]/start_cov_pars[1]
   start_par <- c(start_beta, log(start_cov_pars))
 
+  out <- list()
   estim <- nlminb(start_par,
                         function(x) -log.lik(x),
                         function(x) -grad.log.lik(x),
                         function(x) -hessian.log.lik(x),
                         control=list(trace=1*messages))
 
-  estim$estimate <- estim$par
-  hess.MLE <- hessian.log.lik(estim$estimate)
+  out$y <- y
+  out$D <- D
+  out$coords <- coords
+  out$ID_coords <- ID_coords
+  out$fix_tau2 <- fix_tau2
+  out$fix_sigma2_me <- fix_sigma2_me
+  out$re <- re_unique
+  out$ID_re <- ID_re
+  out$estimate <- estim$par
+  out$grad.MLE <- grad.log.lik(estim$par)
+  hess.MLE <- hessian.log.lik(estim$par)
+  out$covariance <- solve(-hess.MLE)
+  out$log.lik <- -estim$objective
 
-  grad.MLE <- grad.log.lik(estim$estimate)
-      cat("\n","Gradient at MLE:",
-          paste(round(grad.MLE,10)),"\n")
 
-  estim$covariance <- solve(-hess.MLE)
-  estim$log.lik <- -estim$objective
+  class(out) <- "RiskMap"
+  return(out)
+}
+
+##' @title Summarizing model fits
+##' @description \code{summary} method for the class "RiskMap" that computes the standard errors and p-values of likelihood-based model fits.
+##' @param object an object of class "RiskMap" obatained as result of a call to \code{\link{glgm}}
+##' @return A list with the following components
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @method summary RiskMap
+##' @export
+##'
+
+summary.RiskMap <- function(object) {
+
+  n_re <- length(object$re)
+  if(n_re > 0) {
+    re_names <- names(object$re)
+  }
+
+  p <- ncol(object$D)
+  ind_beta <- 1:p
+
+  names(object$estimate)[ind_beta] <- colnames(object$D)
+  ind_sigma2 <- p+1
+  names(object$estimate)[ind_sigma2] <- "Spatial process var."
+  ind_phi <- p+2
+  names(object$estimate)[ind_phi] <- "Spatial corr. scale"
+
+  if(is.null(object$fix_tau2)) {
+    ind_tau2 <- p+3
+    names(object$estimate)[ind_tau2] <- "Variance of the nugget"
+    object$estimate[ind_tau2] <- object$estimate[ind_tau2]+object$estimate[ind_sigma2]
+    if(is.null(object$fix_sigma2_me)) {
+      ind_sigma2_me <- p+4
+    } else {
+      ind_sigma2_me <- NULL
+    }
+    if(n_re>0) {
+      ind_sigma2_re <- (p+5):(p+4+n_re)
+    }
+  } else {
+    ind_tau2 <- NULL
+    if(is.null(object$fix_sigma2_me)) {
+      ind_sigma2_me <- p+3
+      names(object$estimate)[ind_sigma2_me] <- "Measuremment error var."
+    } else {
+      ind_sigma2_me <- NULL
+    }
+    if(n_re>0) {
+      ind_sigma2_re <- (p+4):(p+3+n_re)
+    }
+  }
+  ind_sp <- c(ind_sigma2, ind_phi, ind_tau2)
+
+  n_p <- length(object$estimate)
+  object$estimate[-ind_beta] <- exp(object$estimate[-ind_beta])
+
+  if(n_re > 0) {
+    for(i in 1:n_re) {
+      names(object$estimate)[ind_sigma2_re[i]] <- paste(re_names[i]," (random eff. var.)",sep="")
+    }
+  }
+
+  J <- diag(1:n_p)
+  if(length(ind_tau2)>0) J[ind_tau2,ind_sigma2] <- 1
+
+  H <- solve(-object$covariance)
+  H_new <- t(J)%*%H%*%J
+
+  covariance_new <- solve(-H_new)
+
+  se_par <- sqrt(diag(covariance_new))
+  res <- list()
+  # Reg. coefficeints
+  zval <- object$estimate[ind_beta]/se_par[ind_beta]
+  res$reg_coef <- cbind(Estimate = object$estimate[ind_beta], StdErr = se_par[ind_beta],
+                        z.value = zval, p.value = 2 * pnorm(-abs(zval)))
+
+  # Measurement error variance (linear model)
+  if(object$call$family=="gaussian") {
+    if(is.null(object$fix_sigma2_me)) {
+      res$me <- cbind(Estimate = object$estimate[ind_sigma2_me],
+                      'Lower limit' = exp(log(object$estimate[ind_sigma2_me])-qnorm(0.975)*se_par[ind_sigma2_me]),
+                      'Upper limit' = exp(log(object$estimate[ind_sigma2_me])+qnorm(0.975)*se_par[ind_sigma2_me]))
+    } else {
+      res$me <- object$fix_sigma2_me
+    }
+  }
+
+  # Spatial process
+  res$sp <- cbind(Estimate = object$estimate[ind_sp],
+                  'Lower limit' = exp(log(object$estimate[ind_sp])-qnorm(0.975)*se_par[ind_sp]),
+                  'Upper limit' = exp(log(object$estimate[ind_sp])+qnorm(0.975)*se_par[ind_sp]))
+
+  # Random effects
+  if(n_re>0) {
+    res$ranef <- cbind(Estimate = object$estimate[ind_sigma2_re],
+              'Lower limit' = exp(log(object$estimate[ind_sigma2_re])-qnorm(0.975)*se_par[ind_sigma2_re]),
+              'Upper limit' = exp(log(object$estimate[ind_sigma2_re])+qnorm(0.975)*se_par[ind_sigma2_re]))
+  }
+
+  inter_f <- interpret.formula(object$call$formula)
+  res$family <- object$call$family
+  res$kappa <- inter_f$gp$kappa
+  res$log.lik <- object$log.lik
+
+  class(res) <- "summary.RiskMap"
+  return(res)
+}
+
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @method print summary.RiskMap
+##' @export
+print.summary.RiskMap <- function(x) {
+  if(x$family=="gaussian") {
+    cat("Geostatistical linear model \n")
+  }
 
 
-  class(estim) <- "RiskMap"
-  return(estim)
+
+  cat("\n Regression coefficients \n")
+  printCoefmat(x$reg_coef,P.values=TRUE,has.Pvalue=TRUE)
+
+  if(x$family=="gaussian") {
+    if(length(x$me)>1) {
+      cat("\n Measurement error var. \n")
+      printCoefmat(x$me, Pvalues = FALSE)
+    } else {
+      cat("\n Measurement error var. fixed at", x$me,"\n")
+    }
+  }
+
+  cat("\n Spatial Guassian process \n")
+  cat("Matern covariance parameters (kappa=",x$kappa,") \n",sep="")
+  printCoefmat(x$sp, Pvalues = FALSE)
+
+
+  if(!is.null(x$ranef)) {
+    cat("\n Unstructured random effects \n")
+    printCoefmat(x$ranef, Pvalues = FALSE)
+  }
+  cat("\n Log-likelihood: ",x$log.lik,"\n \n",sep="")
+
+
 }
