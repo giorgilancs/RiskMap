@@ -161,7 +161,7 @@ matern.hessian.phi <- function(U,phi,kappa) {
   hess.phi.mat
 }
 
-gp <- function (..., kappa = 0.5, nugget = NULL, crs = NULL) {
+gp <- function (..., kappa = 0.5, nugget = 0) {
   vars <- as.list(substitute(list(...)))[-1]
   d <- length(vars)
   term <- NULL
@@ -171,11 +171,7 @@ gp <- function (..., kappa = 0.5, nugget = NULL, crs = NULL) {
        (is.numeric(nugget) & nugget <0)) stop("when 'nugget' is not NULL, this must be a positive
                                  real number")
   }
-  if(length(crs)>0) {
-    if(!is.numeric(crs) |
-       (is.numeric(crs) &
-        (crs%%1!=0 | crs <0))) stop("'crs' must be a positive integer number")
-  }
+
 
   if (d == 0) {
     term <- "sf"
@@ -183,10 +179,6 @@ gp <- function (..., kappa = 0.5, nugget = NULL, crs = NULL) {
     if (d > 0) {
       for (i in 1:d) {
         term[i] <- deparse(vars[[i]], backtick = TRUE, width.cutoff = 500)
-      }
-      if(is.null(crs)) {
-        warning("'crs' is set to 4326 (long/lat)")
-        crs <- 4326
       }
     }
 
@@ -198,7 +190,7 @@ gp <- function (..., kappa = 0.5, nugget = NULL, crs = NULL) {
     for (i in 2:d) full.call <- paste(full.call, ",", term[i],
                                       sep = "")
   label <- gsub("sf", "", paste(full.call, ")", sep = ""))
-  ret <- list(term = term, kappa = kappa, nugget = nugget, dim = d, crs=crs,
+  ret <- list(term = term, kappa = kappa, nugget = nugget, dim = d,
               label = label)
   class(ret) <- "gp.spec"
   ret

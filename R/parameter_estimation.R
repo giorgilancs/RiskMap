@@ -7,7 +7,7 @@ glgm <- function(formula,
                  family,
                  distr_offset = NULL,
                  cov_offset = NULL,
-                 convert_to_crs = NULL,
+                 crs = NULL, convert_to_crs = NULL,
                  scale_to_km = TRUE,
                  control_MCMC = NULL,
                  S_samples = NULL,
@@ -33,11 +33,16 @@ glgm <- function(formula,
 
   inter_f <- interpret.formula(formula)
 
-
-  if(length(inter_f$gp.spec$term) == 1 & inter_f$gp.spec$term[1]=="sf" &
-     class(data)[1]!="sf") stop("'data' must be an object of class 'sf'")
-
+  if(length(crs)>0) {
+    if(!is.numeric(crs) |
+       (is.numeric(crs) &
+        (crs%%1!=0 | crs <0))) stop("'crs' must be a positive integer number")
+  }
   if(class(data)[1]=="data.frame") {
+    if(is.null(crs)) {
+      warning("'crs' is set to 4326 (long/lat)")
+      crs <- 4326
+    }
     if(length(inter_f$gp.spec$term)==2) {
       new_x <- paste(inter_f$gp.spec$term[1],"_sf",sep="")
       new_y <- paste(inter_f$gp.spec$term[2],"_sf",sep="")
@@ -45,13 +50,22 @@ glgm <- function(formula,
       data[[new_y]] <-  data[[inter_f$gp.spec$term[2]]]
       data <- st_as_sf(data,
                        coords = c(new_x, new_y),
-                       crs = inter_f$gp.spec$crs)
+                       crs = crs)
     }
   }
 
+  if(length(inter_f$gp.spec$term) == 1 & inter_f$gp.spec$term[1]=="sf" &
+     class(data)[1]!="sf") stop("'data' must be an object of class 'sf'")
 
-  if(is.na(st_crs(data))) stop("the CRS of the data is missing
-                               and must be specified; see ?st_crs")
+
+  if(class(data)[1]=="sf") {
+    if(is.na(st_crs(data)) & is.null(crs)) {
+      stop("the CRS of the sf object passed to 'data' is missing and and is not specified through 'crs'")
+    } else if(is.na(st_crs(data))) {
+      st_crs(data) <- crs
+    }
+  }
+
 
   if(family=="binomial") {
     if(is.null(distr_offset)) stop("if family='binomial', the argument 'm_offset'
@@ -120,6 +134,14 @@ glgm <- function(formula,
                      coords_o[i,2]==coords[,2]))
   s_unique <- unique(ID_coords)
 
+  fix_tau2 <- inter_f$gp.spec$nugget
+
+  if(all(table(ID_coords)==1) &
+    is.null(fix_tau2) & is.null(fix_sigma2_me)) {
+    stop("When there is only one observation per location, both the nugget and measurement error cannot
+         be estimate. Consider removing either one of them. ")
+  }
+
   if(scale_to_km) {
     coords_o <- coords_o/1000
     coords <- coords/1000
@@ -128,7 +150,6 @@ glgm <- function(formula,
     if(messages) cat("Distances between locations are computed in meters \n")
   }
 
-  fix_tau2 <- inter_f$gp.spec$nugget
 
   if(is.null(start_pars$beta)) {
     start_pars$beta <- as.numeric(solve(t(D)%*%D)%*%t(D)%*%y)
@@ -1099,12 +1120,13 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
 ##' @export
 ##'
 
-summary.RiskMap <- function(object) {
+summary.RiskMap <- function(object, conf_level = 0.95) {
 
   n_re <- length(object$re)
   if(n_re > 0) {
     re_names <- names(object$re)
   }
+  alpha <- 1-conf_level
 
   p <- ncol(object$D)
   ind_beta <- 1:p
@@ -1162,15 +1184,18 @@ summary.RiskMap <- function(object) {
   res <- list()
   # Reg. coefficeints
   zval <- object$estimate[ind_beta]/se_par[ind_beta]
-  res$reg_coef <- cbind(Estimate = object$estimate[ind_beta], StdErr = se_par[ind_beta],
+  res$reg_coef <- cbind(Estimate = object$estimate[ind_beta],
+                        'Lower limit' = object$estimate[ind_beta]-se_par[ind_beta]*qnorm(alpha/2),
+                        'Upper limit' = object$estimate[ind_beta]+se_par[ind_beta]*qnorm(alpha/2),
+                        StdErr = se_par[ind_beta],
                         z.value = zval, p.value = 2 * pnorm(-abs(zval)))
 
   # Measurement error variance (linear model)
   if(object$call$family=="gaussian") {
     if(is.null(object$fix_sigma2_me)) {
       res$me <- cbind(Estimate = object$estimate[ind_sigma2_me],
-                      'Lower limit' = exp(log(object$estimate[ind_sigma2_me])-qnorm(0.975)*se_par[ind_sigma2_me]),
-                      'Upper limit' = exp(log(object$estimate[ind_sigma2_me])+qnorm(0.975)*se_par[ind_sigma2_me]))
+                      'Lower limit' = exp(log(object$estimate[ind_sigma2_me])-qnorm(alpha/2)*se_par[ind_sigma2_me]),
+                      'Upper limit' = exp(log(object$estimate[ind_sigma2_me])+qnorm(alpha/2)*se_par[ind_sigma2_me]))
     } else {
       res$me <- object$fix_sigma2_me
     }
@@ -1178,20 +1203,24 @@ summary.RiskMap <- function(object) {
 
   # Spatial process
   res$sp <- cbind(Estimate = object$estimate[ind_sp],
-                  'Lower limit' = exp(log(object$estimate[ind_sp])-qnorm(0.975)*se_par[ind_sp]),
-                  'Upper limit' = exp(log(object$estimate[ind_sp])+qnorm(0.975)*se_par[ind_sp]))
+                  'Lower limit' = exp(log(object$estimate[ind_sp])-qnorm(alpha/2)*se_par[ind_sp]),
+                  'Upper limit' = exp(log(object$estimate[ind_sp])+qnorm(alpha/2)*se_par[ind_sp]))
+
+  if(!is.null(object$fix_tau2)) res$tau2 <- object$fix_tau2
 
   # Random effects
   if(n_re>0) {
     res$ranef <- cbind(Estimate = object$estimate[ind_sigma2_re],
-              'Lower limit' = exp(log(object$estimate[ind_sigma2_re])-qnorm(0.975)*se_par[ind_sigma2_re]),
-              'Upper limit' = exp(log(object$estimate[ind_sigma2_re])+qnorm(0.975)*se_par[ind_sigma2_re]))
+              'Lower limit' = exp(log(object$estimate[ind_sigma2_re])-qnorm(alpha/2)*se_par[ind_sigma2_re]),
+              'Upper limit' = exp(log(object$estimate[ind_sigma2_re])+qnorm(alpha/2)*se_par[ind_sigma2_re]))
   }
 
   inter_f <- interpret.formula(object$call$formula)
+  res$conf_level <- conf_level
   res$family <- object$call$family
   res$kappa <- inter_f$gp$kappa
   res$log.lik <- object$log.lik
+  res$aic <- 2*length(res$estimate)-2*res$log.lik
 
   class(res) <- "summary.RiskMap"
   return(res)
@@ -1205,6 +1234,9 @@ print.summary.RiskMap <- function(x) {
     cat("Geostatistical linear model \n")
   }
 
+  cat("'Lower limit' and 'Upper limit' are the ",
+      x$conf_level*100,
+      "% confidence level intervals \n", sep="")
 
 
   cat("\n Regression coefficients \n")
@@ -1212,7 +1244,7 @@ print.summary.RiskMap <- function(x) {
 
   if(x$family=="gaussian") {
     if(length(x$me)>1) {
-      cat("\n Measurement error var. \n")
+      cat("\n ")
       printCoefmat(x$me, Pvalues = FALSE)
     } else {
       cat("\n Measurement error var. fixed at", x$me,"\n")
@@ -1222,13 +1254,14 @@ print.summary.RiskMap <- function(x) {
   cat("\n Spatial Guassian process \n")
   cat("Matern covariance parameters (kappa=",x$kappa,") \n",sep="")
   printCoefmat(x$sp, Pvalues = FALSE)
+  if(!is.null(x$tau2)) cat("Variance of the nugget effect fixed at",x$tau2,"\n")
 
 
   if(!is.null(x$ranef)) {
     cat("\n Unstructured random effects \n")
     printCoefmat(x$ranef, Pvalues = FALSE)
   }
-  cat("\n Log-likelihood: ",x$log.lik,"\n \n",sep="")
-
+  cat("\n Log-likelihood: ",x$log.lik,"\n",sep="")
+  cat("\n AIC: ",x$aic,"\n \n",sep="")
 
 }
