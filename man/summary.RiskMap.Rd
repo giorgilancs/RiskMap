@@ -4,10 +4,10 @@
 \alias{summary.RiskMap}
 \title{Summarizing model fits}
 \usage{
-\method{summary}{RiskMap}(object)
+\method{summary}{RiskMap}(object, conf_level = 0.95)
 }
 \arguments{
-\item{object}{an object of class "RiskMap" obatained as result of a call to \code{\link{glgm}}}
+\item{object}{an object of class "RiskMap" obatained as result of a call to \code{\link{glgpm}}}
 }
 \value{
 A list with the following components

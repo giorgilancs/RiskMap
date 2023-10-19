@@ -1,8 +1,8 @@
-##' @title Estimation of Generalized Linear Geostatitsical Models
+##' @title Estimation of Generalized Linear Gaussian Process Models
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @importFrom sf st_crs st_as_sf st_drop_geometry
 ##' @export
-glgm <- function(formula,
+glgpm <- function(formula,
                  data,
                  family,
                  distr_offset = NULL,
@@ -209,7 +209,7 @@ glgm <- function(formula,
         if(start_pars$sigma2_me<0) stop("the starting value for sigma2_me must be positive")
       }
     }
-    res <- glgm_lm(y, D, coords, kappa = inter_f$gp.spec$kappa,
+    res <- glgpm_lm(y, D, coords, kappa = inter_f$gp.spec$kappa,
             ID_coords, ID_re, s_unique, re_unique,
             fix_sigma2_me, fix_tau2,
             start_beta = start_pars$beta,
@@ -222,6 +222,7 @@ glgm <- function(formula,
   } else if(family=="binomial" | family=="poisson") {
 
   }
+  res$data_sf <- data
   res$call <- match.call()
   return(res)
 }
@@ -230,7 +231,7 @@ glgm <- function(formula,
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @importFrom maxLik maxBFGS
 ##' @importFrom Matrix Matrix forceSymmetric
-glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
+glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
                     fix_sigma2_me, fix_tau2, start_beta, start_cov_pars, messages) {
 
   m <- length(y)
@@ -1111,9 +1112,73 @@ glgm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
   return(out)
 }
 
+##' @title Extracting the parameter estimates from a model fit
+##' @description \code{coef} method for the class "RiskMap" that extracts the
+##' maximum likelihood estimates from the model fits obtained from the function
+##' \code{\link{glgpm}}
+##' @param object an object of class "RiskMap" obatained as result of a call to \code{\link{glgpm}}
+##' @return A vector of the maximum likelihood estimates
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @method coef RiskMap
+##' @export
+##'
+coef.RiskMap <- function(object) {
+  n_re <- length(object$re)
+  if(n_re > 0) {
+    re_names <- names(object$re)
+  }
+
+  p <- ncol(object$D)
+  ind_beta <- 1:p
+
+  names(object$estimate)[ind_beta] <- colnames(object$D)
+  ind_sigma2 <- p+1
+  names(object$estimate)[ind_sigma2] <- "sigma2"
+  ind_phi <- p+2
+  names(object$estimate)[ind_phi] <- "phi"
+
+  if(is.null(object$fix_tau2)) {
+    ind_tau2 <- p+3
+    names(object$estimate)[ind_tau2] <- "tau2"
+    object$estimate[ind_tau2] <- object$estimate[ind_tau2]+object$estimate[ind_sigma2]
+    if(is.null(object$fix_sigma2_me)) {
+      ind_sigma2_me <- p+4
+    } else {
+      ind_sigma2_me <- NULL
+    }
+    if(n_re>0) {
+      ind_sigma2_re <- (p+5):(p+4+n_re)
+    }
+  } else {
+    ind_tau2 <- NULL
+    if(is.null(object$fix_sigma2_me)) {
+      ind_sigma2_me <- p+3
+      names(object$estimate)[ind_sigma2_me] <- "sigma2_me"
+    } else {
+      ind_sigma2_me <- NULL
+    }
+    if(n_re>0) {
+      ind_sigma2_re <- (p+4):(p+3+n_re)
+    }
+  }
+  ind_sp <- c(ind_sigma2, ind_phi, ind_tau2)
+
+  n_p <- length(object$estimate)
+  object$estimate[-ind_beta] <- exp(object$estimate[-ind_beta])
+
+  if(n_re > 0) {
+    for(i in 1:n_re) {
+      names(object$estimate)[ind_sigma2_re[i]] <- paste(re_names[i],"_sigma2_re",sep="")
+    }
+  }
+
+  res <- object$estimate
+  return(res)
+}
+
 ##' @title Summarizing model fits
 ##' @description \code{summary} method for the class "RiskMap" that computes the standard errors and p-values of likelihood-based model fits.
-##' @param object an object of class "RiskMap" obatained as result of a call to \code{\link{glgm}}
+##' @param object an object of class "RiskMap" obatained as result of a call to \code{\link{glgpm}}
 ##' @return A list with the following components
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @method summary RiskMap
@@ -1264,4 +1329,285 @@ print.summary.RiskMap <- function(x) {
   cat("\n Log-likelihood: ",x$log.lik,"\n",sep="")
   cat("\n AIC: ",x$aic,"\n \n",sep="")
 
+}
+
+##' @title Simulation from Generalized Linear Gaussian Process Models
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @importFrom sf st_crs st_as_sf st_drop_geometry
+##' @export
+glgpm_sim <- function(n_sim,
+                      model_fit = NULL,
+                      formula = NULL,
+                      data = NULL,
+                      family = NULL,
+                      distr_offset = NULL,
+                      cov_offset = NULL,
+                      crs = NULL, convert_to_crs = NULL,
+                      scale_to_km = TRUE,
+                      control_MCMC = NULL,
+                      sigma2_me = NULL,
+                      sim_pars = list(beta = NULL,
+                                      sigma2 = NULL,
+                                      tau2 = NULL,
+                                      phi = NULL,
+                                      sigma2_me = NULL,
+                                      sigma2_re = NULL),
+                      messages = TRUE) {
+
+  if(!is.null(model_fit)) {
+    if(class(model_fit)!="RiskMap") stop("'model_fit' must be of class 'RiskMap'")
+    formula <- as.formula(model_fit$call$formula)
+    data <- model_fit$data_sf
+    family = model_fit$call$family
+    crs <- model_fit$call$crs
+    convert_to_crs <- model_fit$call$convert_to_crs
+    scale_to_km <- model_fit$call$scale_to_km
+    if(is.null(scale_to_km)) scale_to_km <- TRUE
+  }
+
+  if(family=="binomial" | family=="poisson") {
+    if(is.null(control_MCMC)) stop("if family='binomial' or family='poisson'
+                                   'control_MCMC' must be provided.")
+    if(class(control_MCMC)!="mcmc.RiskMap") stop("'control_MCMC' must be of class 'mcmc.PrevMap'")
+  }
+
+  if(class(formula)!="formula") stop("'formula' must be a 'formula'
+                                     object indicating the variables of the
+                                     model to be fitted")
+
+  inter_f <- interpret.formula(formula)
+
+  if(length(crs)>0) {
+    if(!is.numeric(crs) |
+       (is.numeric(crs) &
+        (crs%%1!=0 | crs <0))) stop("'crs' must be a positive integer number")
+  }
+  if(class(data)[1]=="data.frame") {
+    if(is.null(crs)) {
+      warning("'crs' is set to 4326 (long/lat)")
+      crs <- 4326
+    }
+    if(length(inter_f$gp.spec$term)==2) {
+      new_x <- paste(inter_f$gp.spec$term[1],"_sf",sep="")
+      new_y <- paste(inter_f$gp.spec$term[2],"_sf",sep="")
+      data[[new_x]] <-  data[[inter_f$gp.spec$term[1]]]
+      data[[new_y]] <-  data[[inter_f$gp.spec$term[2]]]
+      data <- st_as_sf(data,
+                       coords = c(new_x, new_y),
+                       crs = crs)
+    }
+  }
+
+  if(length(inter_f$gp.spec$term) == 1 & inter_f$gp.spec$term[1]=="sf" &
+     class(data)[1]!="sf") stop("'data' must be an object of class 'sf'")
+
+
+  if(class(data)[1]=="sf") {
+    if(is.na(st_crs(data)) & is.null(crs)) {
+      stop("the CRS of the sf object passed to 'data' is missing and and is not specified through 'crs'")
+    } else if(is.na(st_crs(data))) {
+      st_crs(data) <- crs
+    }
+  }
+
+
+  if(family=="binomial") {
+    if(is.null(distr_offset)) stop("if family='binomial', the argument 'm_offset'
+                               must be provided")
+    m_offset_ch <- as.charaster(as.name(subsitute(distr_offset)))
+  }
+
+  kappa <- inter_f$gp.spec$kappa
+  if(kappa < 0) stop("kappa must be positive.")
+
+  if(family != "gaussian" & family != "binomial" &
+     family != "poisson") stop("'family' must be either 'gaussian', 'binomial'
+                               or 'poisson'")
+
+
+  mf <- model.frame(inter_f$pf,data=data, na.action = na.fail)
+
+  # Extract outcome data
+  y <- as.numeric(model.response(mf))
+  n <- length(y)
+
+  # Extract covariates matrix
+  D <- as.matrix(model.matrix(attr(mf,"terms"),data=data))
+
+  if(length(inter_f$re.spec) > 0) {
+    hr_re <- inter_f$re.spec$term
+  } else {
+    hr_re <- NULL
+  }
+
+
+  if(!is.null(hr_re)) {
+    # Define indices of random effects
+    re_mf <- st_drop_geometry(data[hr_re])
+    if(any(is.na(re_mf))) stop("Missing values in the variable(s) of the random effects specified through re() ")
+    names_re <- colnames(re_mf)
+    n_re <- ncol(re_mf)
+
+    ID_re <- matrix(NA, nrow = n, ncol = n_re)
+    re_unique <- list()
+    for(i in 1:n_re) {
+      re_unique[[names_re[i]]] <- unique(re_mf[,i])
+      ID_re[, i] <- sapply(1:n,
+                           function(j) which(re_mf[j,i]==re_unique[[names_re[i]]]))
+    }
+  } else {
+    n_re <- 0
+    re_unique <- NULL
+    ID_re <- NULL
+  }
+
+
+  if(!is.null(model_fit)) {
+    p <- ncol(D)
+    ind_beta <- 1:p
+    par_hat <- coef(model_fit)
+
+    beta <- par_hat[ind_beta]
+    ind_sigma2 <- p+1
+    sigma2 <- par_hat[ind_sigma2]
+    ind_phi <- p+2
+    phi <- par_hat[ind_phi]
+
+    if(is.null(model_fit$fix_tau2)) {
+      ind_tau2 <- p+3
+      tau2 <- par_hat[ind_tau2]
+      if(is.null(model_fit$fix_sigma2_me)) {
+        ind_sigma2_me <- p+4
+        sigma2_me <- par_hat[ind_sigma2_me]
+      } else {
+        sigma2_me <- model_fit$fix_sigma2_me
+      }
+      if(n_re>0) {
+        ind_sigma2_re <- (p+5):(p+4+n_re)
+        sigma2_re <- par_hat[ind_sigma2_re]
+      }
+    } else {
+      tau2 <- model_fit$fix_tau2
+      if(is.null(model_fit$fix_sigma2_me)) {
+        ind_sigma2_me <- p+3
+        sigma2_me <- par_hat[ind_sigma2_me]
+      } else {
+        sigma2_me <- model_fit$fix_sigma2_me
+      }
+      if(n_re>0) {
+        ind_sigma2_re <- (p+4):(p+3+n_re)
+        sigma2_re <- par_hat[ind_sigma2_re]
+      }
+    }
+  } else {
+    if(is.null(sim$beta)) stop("'beta' is missing")
+    beta <- sim_pars$beta
+    if(is.null(sim$sigma2)) stop("'sigma2' is missing")
+    sigma2 <- sim_pars$sigma2
+    if(is.null(sim$phi)) stop("'phi' is missing")
+    phi <- sim_pars$phi
+    if(is.null(sim$tau2)) stop("'tau2' is missing")
+    tau2 <- sim_pars$tau2
+    if(is.null(sim$sigma2_me)) stop("'sigma2_me' is missing")
+    sigma2_me <- sim_pars$sigma2_me
+    if(n_re>0) {
+      if(is.null(sim$sigma2_re)) steop("'sigma2_re' is missing")
+      if(length(sim$sigma2_re)!=n_re) stop("the values passed to 'sigma2_re' in 'sim_pars'
+      does not match the number of random effects specfied in re() in the formula")
+      sigma2_re <- sim_pars$sigma2_re
+    }
+  }
+
+  # Extract coordinates
+  if(!is.null(convert_to_crs)) {
+    if(!is.numeric(convert_to_crs)) stop("'convert_to_utm' must be a numeric object")
+    data <- st_transform(data, crs = convert_to_crs)
+  }
+  if(messages) cat("The CRS used is", as.list(st_crs(data))$input, "\n")
+
+  coords_o <- st_coordinates(data)
+  coords <- unique(coords_o)
+
+  m <- nrow(coords_o)
+  ID_coords <- sapply(1:m, function(i)
+    which(coords_o[i,1]==coords[,1] &
+            coords_o[i,2]==coords[,2]))
+  s_unique <- unique(ID_coords)
+
+
+
+
+  if(all(table(ID_coords)==1) & (tau2!=0 & sigma2_me!=0)) {
+    stop("When there is only one observation per location, both the nugget and measurement error cannot
+         be estimate. Consider removing either one of them. ")
+  }
+
+  if(scale_to_km) {
+    coords_o <- coords_o/1000
+    coords <- coords/1000
+    if(messages) cat("Distances between locations are computed in kilometers \n")
+  } else {
+    if(messages) cat("Distances between locations are computed in meters \n")
+  }
+
+  # Simulate S
+  Sigma <- sigma2*matern_cor(dist(coords), phi = phi, kappa = kappa,
+                             return_sym_matrix = TRUE)
+  diag(Sigma) <- diag(Sigma) + tau2
+  Sigma_sroot <- t(chol(Sigma))
+  S_sim <- t(sapply(1:n_sim, function(i) Sigma_sroot%*%rnorm(nrow(coords))))
+
+  # Simulate random effects
+  if(n_re>0) {
+    re_sim <- list()
+    re_names <- names(model_fit$re)
+    dim_re <- sapply(1:n_re, function(j) length(re_unique[[j]]))
+    for(i in 1:n_sim) {
+      re_sim[[i]] <- list()
+      for(j in 1:n_re) {
+        re_sim[[i]][[paste(re_names[j])]] <- rnorm(dim_re[j])*sqrt(sigma2_re[j])
+      }
+    }
+  }
+
+  # Linear predictor
+  eta_sim <- t(sapply(1:n_sim, function(i) D%*%beta + S_sim[i,][ID_coords]))
+
+  if(n_re > 0) {
+    for(i in 1:n_sim) {
+      for(j in 1:n_re) {
+        eta_sim[i,] <- eta_sim[i,] + re_sim[[i]][[paste(re_names[j])]][ID_re[,j]]
+      }
+    }
+  }
+
+  y_sim <- matrix(NA, nrow=n_sim, ncol=n)
+  if(family=="gaussian") {
+    lin_pred <- eta_sim
+
+    for(i in 1:n_sim) {
+      y_sim[i,] <- lin_pred[i,] + sqrt(sigma2_me)*rnorm(n)
+    }
+  }
+
+  data_sim <- list()
+  for(i in 1:n_sim) {
+    data_sim[[i]] <- model_fit$data_sf
+    data_sim[[i]][,inter_f$response] <- y_sim[i,]
+  }
+  out <- list(data_sim = data_sim,
+              S_sim = S_sim,
+              lin_pred_sim = lin_pred,
+              beta = beta,
+              sigma2 = sigma2,
+              tau2 = tau2,
+              phi = phi)
+  if(family=="gaussian") {
+    out$sigma2_me <- sigma2_me
+  }
+  if(n_re>0) {
+    out$sigma2_re <- sigma2_re
+    out$re_sim <- re_sim
+  }
+  return(out)
 }
