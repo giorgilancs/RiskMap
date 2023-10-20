@@ -222,7 +222,14 @@ glgpm <- function(formula,
   } else if(family=="binomial" | family=="poisson") {
 
   }
+
+  res$formula <- formula
+  res$family <- family
+  res$crs <- crs
+  res$convert_to_crs <- convert_to_crs
+  res$scale_to_km <- scale_to_km
   res$data_sf <- data
+  res$kappa <- kappa
   res$call <- match.call()
   return(res)
 }
@@ -1276,14 +1283,13 @@ summary.RiskMap <- function(object, conf_level = 0.95) {
   # Random effects
   if(n_re>0) {
     res$ranef <- cbind(Estimate = object$estimate[ind_sigma2_re],
-              'Lower limit' = exp(log(object$estimate[ind_sigma2_re])-qnorm(alpha/2)*se_par[ind_sigma2_re]),
-              'Upper limit' = exp(log(object$estimate[ind_sigma2_re])+qnorm(alpha/2)*se_par[ind_sigma2_re]))
+                       'Lower limit' = exp(log(object$estimate[ind_sigma2_re])-qnorm(alpha/2)*se_par[ind_sigma2_re]),
+                       'Upper limit' = exp(log(object$estimate[ind_sigma2_re])+qnorm(alpha/2)*se_par[ind_sigma2_re]))
   }
 
-  inter_f <- interpret.formula(object$call$formula)
   res$conf_level <- conf_level
-  res$family <- object$call$family
-  res$kappa <- inter_f$gp$kappa
+  res$family <- object$family
+  res$kappa <- object$kappa
   res$log.lik <- object$log.lik
   res$aic <- 2*length(res$estimate)-2*res$log.lik
 
@@ -1345,7 +1351,6 @@ glgpm_sim <- function(n_sim,
                       crs = NULL, convert_to_crs = NULL,
                       scale_to_km = TRUE,
                       control_MCMC = NULL,
-                      sigma2_me = NULL,
                       sim_pars = list(beta = NULL,
                                       sigma2 = NULL,
                                       tau2 = NULL,
@@ -1356,14 +1361,14 @@ glgpm_sim <- function(n_sim,
 
   if(!is.null(model_fit)) {
     if(class(model_fit)!="RiskMap") stop("'model_fit' must be of class 'RiskMap'")
-    formula <- as.formula(model_fit$call$formula)
+    formula <- as.formula(model_fit$formula)
     data <- model_fit$data_sf
-    family = model_fit$call$family
-    crs <- model_fit$call$crs
-    convert_to_crs <- model_fit$call$convert_to_crs
-    scale_to_km <- model_fit$call$scale_to_km
-    if(is.null(scale_to_km)) scale_to_km <- TRUE
+    family = model_fit$family
+    crs <- model_fit$crs
+    convert_to_crs <- model_fit$convert_to_crs
+    scale_to_km <- model_fit$scale_to_km
   }
+  inter_f <- interpret.formula(formula)
 
   if(family=="binomial" | family=="poisson") {
     if(is.null(control_MCMC)) stop("if family='binomial' or family='poisson'
@@ -1374,8 +1379,6 @@ glgpm_sim <- function(n_sim,
   if(class(formula)!="formula") stop("'formula' must be a 'formula'
                                      object indicating the variables of the
                                      model to be fitted")
-
-  inter_f <- interpret.formula(formula)
 
   if(length(crs)>0) {
     if(!is.numeric(crs) |
@@ -1427,12 +1430,10 @@ glgpm_sim <- function(n_sim,
 
   mf <- model.frame(inter_f$pf,data=data, na.action = na.fail)
 
-  # Extract outcome data
-  y <- as.numeric(model.response(mf))
-  n <- length(y)
 
   # Extract covariates matrix
   D <- as.matrix(model.matrix(attr(mf,"terms"),data=data))
+  n <- nrow(D)
 
   if(length(inter_f$re.spec) > 0) {
     hr_re <- inter_f$re.spec$term
@@ -1461,9 +1462,10 @@ glgpm_sim <- function(n_sim,
     ID_re <- NULL
   }
 
+  # Number of covariates
+  p <- ncol(D)
 
   if(!is.null(model_fit)) {
-    p <- ncol(D)
     ind_beta <- 1:p
     par_hat <- coef(model_fit)
 
@@ -1500,19 +1502,21 @@ glgpm_sim <- function(n_sim,
       }
     }
   } else {
-    if(is.null(sim$beta)) stop("'beta' is missing")
+    if(is.null(sim_pars$beta)) stop("'beta' is missing")
     beta <- sim_pars$beta
-    if(is.null(sim$sigma2)) stop("'sigma2' is missing")
+    if(length(beta)!=p) stop("the number of values provided for 'beta' does not match
+    the number of covariates specified in the formula")
+    if(is.null(sim_pars$sigma2)) stop("'sigma2' is missing")
     sigma2 <- sim_pars$sigma2
-    if(is.null(sim$phi)) stop("'phi' is missing")
+    if(is.null(sim_pars$phi)) stop("'phi' is missing")
     phi <- sim_pars$phi
-    if(is.null(sim$tau2)) stop("'tau2' is missing")
+    if(is.null(sim_pars$tau2)) stop("'tau2' is missing")
     tau2 <- sim_pars$tau2
-    if(is.null(sim$sigma2_me)) stop("'sigma2_me' is missing")
+    if(is.null(sim_pars$sigma2_me)) stop("'sigma2_me' is missing")
     sigma2_me <- sim_pars$sigma2_me
     if(n_re>0) {
-      if(is.null(sim$sigma2_re)) steop("'sigma2_re' is missing")
-      if(length(sim$sigma2_re)!=n_re) stop("the values passed to 'sigma2_re' in 'sim_pars'
+      if(is.null(sim_pars$sigma2_re)) steop("'sigma2_re' is missing")
+      if(length(sim_pars$sigma2_re)!=n_re) stop("the values passed to 'sigma2_re' in 'sim_pars'
       does not match the number of random effects specfied in re() in the formula")
       sigma2_re <- sim_pars$sigma2_re
     }
@@ -1560,7 +1564,12 @@ glgpm_sim <- function(n_sim,
   # Simulate random effects
   if(n_re>0) {
     re_sim <- list()
-    re_names <- names(model_fit$re)
+    if(!is.null(model_fit)) {
+      re_names <- names(model_fit$re)
+    } else {
+      re_names <- inter_f$re.spec$term
+    }
+
     dim_re <- sapply(1:n_re, function(j) length(re_unique[[j]]))
     for(i in 1:n_sim) {
       re_sim[[i]] <- list()
@@ -1590,10 +1599,14 @@ glgpm_sim <- function(n_sim,
     }
   }
 
-  data_sim <- list()
+  if(!is.null(model_fit)) {
+    data_sim <- model_fit$data_sf
+  } else {
+    data_sim <- data
+  }
+
   for(i in 1:n_sim) {
-    data_sim[[i]] <- model_fit$data_sf
-    data_sim[[i]][,inter_f$response] <- y_sim[i,]
+    data_sim[[paste(inter_f$response,"_sim",i,sep="")]] <- y_sim[i,]
   }
   out <- list(data_sim = data_sim,
               S_sim = S_sim,
