@@ -13,7 +13,7 @@
 ##' The coordinate reference system of the data is 32634.
 ##' @docType data
 ##' @keywords datasets
-##' @name gitaly_sim
+##' @name italy_sim
 ##' @usage data(italy_sim)
 ##' @format A data frame with 200 rows and 6 variables
 NULL
