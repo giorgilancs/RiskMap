@@ -1,4 +1,5 @@
 ##' @title Create grid of points within shape file
+##' @importFrom sf st_make_grid st_intersects st_transform st_crs
 ##' @export
 create_grid <- function(shp, spat_res,
                         grid_crs = NULL) {
@@ -12,6 +13,7 @@ create_grid <- function(shp, spat_res,
   } else {
     shp <- st_transform(shp, crs = grid_crs)
   }
+
   grid_box <- st_make_grid(shp,
                            cellsize = spat_res*1000,
                            what="centers")

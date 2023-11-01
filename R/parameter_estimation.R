@@ -100,16 +100,28 @@ glgpm <- function(formula,
   if(!is.null(hr_re)) {
     # Define indices of random effects
     re_mf <- st_drop_geometry(data[hr_re])
+    re_mf_n <- re_mf
+
     if(any(is.na(re_mf))) stop("Missing values in the variable(s) of the random effects specified through re() ")
     names_re <- colnames(re_mf)
     n_re <- ncol(re_mf)
 
     ID_re <- matrix(NA, nrow = n, ncol = n_re)
     re_unique <- list()
+    re_unique_f <- list()
     for(i in 1:n_re) {
-      re_unique[[names_re[i]]] <- unique(re_mf[,i])
-      ID_re[, i] <- sapply(1:n,
-                           function(j) which(re_mf[j,i]==re_unique[[names_re[i]]]))
+      if(is.factor(re_mf[,i])) {
+        re_mf_n[,i] <- as.numeric(re_mf[,i])
+        re_unique[[names_re[i]]] <- 1:length(levels(re_mf[,i]))
+        ID_re[, i] <- sapply(1:n,
+                             function(j) which(re_mf_n[j,i]==re_unique[[names_re[i]]]))
+        re_unique_f[[names_re[i]]] <-levels(re_mf[,i])
+      } else if(is.numeric(re_mf[,i])) {
+        re_unique[[names_re[i]]] <- unique(re_mf[,i])
+        ID_re[, i] <- sapply(1:n,
+                             function(j) which(re_mf_n[j,i]==re_unique[[names_re[i]]]))
+        re_unique_f[[names_re[i]]] <- re_unique[[names_re[i]]]
+      }
     }
   } else {
     n_re <- 0
@@ -223,6 +235,17 @@ glgpm <- function(formula,
 
   }
 
+  res$y <- y
+  res$D <- D
+  res$coords <- coords
+  res$ID_coords <- ID_coords
+  res$re <- re_unique_f
+  if(n_re>1) {
+    res$ID_re <- as.data.frame(ID_re)
+    colnames(res$ID_re) <- names_re
+  }
+  res$fix_tau2 <- fix_tau2
+  res$fix_sigma2_me <- fix_sigma2_me
   res$formula <- formula
   res$family <- family
   res$crs <- crs
@@ -1100,14 +1123,6 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
                         function(x) -hessian.log.lik(x),
                         control=list(trace=1*messages))
 
-  out$y <- y
-  out$D <- D
-  out$coords <- coords
-  out$ID_coords <- ID_coords
-  out$fix_tau2 <- fix_tau2
-  out$fix_sigma2_me <- fix_sigma2_me
-  out$re <- re_unique
-  out$ID_re <- ID_re
   out$estimate <- estim$par
   out$grad.MLE <- grad.log.lik(estim$par)
   hess.MLE <- hessian.log.lik(estim$par)
@@ -1257,8 +1272,8 @@ summary.RiskMap <- function(object, conf_level = 0.95) {
   # Reg. coefficeints
   zval <- object$estimate[ind_beta]/se_par[ind_beta]
   res$reg_coef <- cbind(Estimate = object$estimate[ind_beta],
-                        'Lower limit' = object$estimate[ind_beta]-se_par[ind_beta]*qnorm(alpha/2),
-                        'Upper limit' = object$estimate[ind_beta]+se_par[ind_beta]*qnorm(alpha/2),
+                        'Lower limit' = object$estimate[ind_beta]-se_par[ind_beta]*qnorm(1-alpha/2),
+                        'Upper limit' = object$estimate[ind_beta]+se_par[ind_beta]*qnorm(1-alpha/2),
                         StdErr = se_par[ind_beta],
                         z.value = zval, p.value = 2 * pnorm(-abs(zval)))
 
@@ -1266,8 +1281,8 @@ summary.RiskMap <- function(object, conf_level = 0.95) {
   if(object$call$family=="gaussian") {
     if(is.null(object$fix_sigma2_me)) {
       res$me <- cbind(Estimate = object$estimate[ind_sigma2_me],
-                      'Lower limit' = exp(log(object$estimate[ind_sigma2_me])-qnorm(alpha/2)*se_par[ind_sigma2_me]),
-                      'Upper limit' = exp(log(object$estimate[ind_sigma2_me])+qnorm(alpha/2)*se_par[ind_sigma2_me]))
+                      'Lower limit' = exp(log(object$estimate[ind_sigma2_me])-qnorm(1-alpha/2)*se_par[ind_sigma2_me]),
+                      'Upper limit' = exp(log(object$estimate[ind_sigma2_me])+qnorm(1-alpha/2)*se_par[ind_sigma2_me]))
     } else {
       res$me <- object$fix_sigma2_me
     }
@@ -1275,16 +1290,16 @@ summary.RiskMap <- function(object, conf_level = 0.95) {
 
   # Spatial process
   res$sp <- cbind(Estimate = object$estimate[ind_sp],
-                  'Lower limit' = exp(log(object$estimate[ind_sp])-qnorm(alpha/2)*se_par[ind_sp]),
-                  'Upper limit' = exp(log(object$estimate[ind_sp])+qnorm(alpha/2)*se_par[ind_sp]))
+                  'Lower limit' = exp(log(object$estimate[ind_sp])-qnorm(1-alpha/2)*se_par[ind_sp]),
+                  'Upper limit' = exp(log(object$estimate[ind_sp])+qnorm(1-alpha/2)*se_par[ind_sp]))
 
   if(!is.null(object$fix_tau2)) res$tau2 <- object$fix_tau2
 
   # Random effects
   if(n_re>0) {
     res$ranef <- cbind(Estimate = object$estimate[ind_sigma2_re],
-                       'Lower limit' = exp(log(object$estimate[ind_sigma2_re])-qnorm(alpha/2)*se_par[ind_sigma2_re]),
-                       'Upper limit' = exp(log(object$estimate[ind_sigma2_re])+qnorm(alpha/2)*se_par[ind_sigma2_re]))
+                       'Lower limit' = exp(log(object$estimate[ind_sigma2_re])-qnorm(1-alpha/2)*se_par[ind_sigma2_re]),
+                       'Upper limit' = exp(log(object$estimate[ind_sigma2_re])+qnorm(1-alpha/2)*se_par[ind_sigma2_re]))
   }
 
   res$conf_level <- conf_level
@@ -1445,16 +1460,28 @@ glgpm_sim <- function(n_sim,
   if(!is.null(hr_re)) {
     # Define indices of random effects
     re_mf <- st_drop_geometry(data[hr_re])
+    re_mf_n <- re_mf
+
     if(any(is.na(re_mf))) stop("Missing values in the variable(s) of the random effects specified through re() ")
     names_re <- colnames(re_mf)
     n_re <- ncol(re_mf)
 
     ID_re <- matrix(NA, nrow = n, ncol = n_re)
     re_unique <- list()
+    re_unique_f <- list()
     for(i in 1:n_re) {
-      re_unique[[names_re[i]]] <- unique(re_mf[,i])
-      ID_re[, i] <- sapply(1:n,
-                           function(j) which(re_mf[j,i]==re_unique[[names_re[i]]]))
+      if(is.factor(re_mf[,i])) {
+        re_mf_n[,i] <- as.numeric(re_mf[,i])
+        re_unique[[names_re[i]]] <- 1:length(levels(re_mf[,i]))
+        ID_re[, i] <- sapply(1:n,
+                             function(j) which(re_mf_n[j,i]==re_unique[[names_re[i]]]))
+        re_unique_f[[names_re[i]]] <-levels(re_mf[,i])
+      } else if(is.numeric(re_mf[,i])) {
+        re_unique[[names_re[i]]] <- unique(re_mf[,i])
+        ID_re[, i] <- sapply(1:n,
+                             function(j) which(re_mf_n[j,i]==re_unique[[names_re[i]]]))
+        re_unique_f[[names_re[i]]] <- re_unique[[names_re[i]]]
+      }
     }
   } else {
     n_re <- 0

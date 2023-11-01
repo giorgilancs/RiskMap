@@ -5,8 +5,8 @@
 \title{Simulation from Generalized Linear Gaussian Process Models}
 \usage{
 glgpm_sim(
+  n_sim,
   model_fit = NULL,
-  coords_sim = NULL,
   formula = NULL,
   data = NULL,
   family = NULL,
@@ -16,9 +16,9 @@ glgpm_sim(
   convert_to_crs = NULL,
   scale_to_km = TRUE,
   control_MCMC = NULL,
-  sigma2_me = NULL,
   sim_pars = list(beta = NULL, sigma2 = NULL, tau2 = NULL, phi = NULL, sigma2_me = NULL,
-    sigma2_re = NULL)
+    sigma2_re = NULL),
+  messages = TRUE
 )
 }
 \description{
