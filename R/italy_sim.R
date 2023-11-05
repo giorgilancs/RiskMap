@@ -1,6 +1,6 @@
 ##' @title Simulated data-set on the Italian peninsula
 ##' @description This is a simulated data-set over Italy for a continuous outcome.
-##'
+##' The data-set contains 10 repeated observations for each of the 200 geo-referenced locations.
 ##' The variables are as follows:
 ##' \itemize{
 ##'  \item x1 ordinate of the spatial locations.
@@ -15,5 +15,5 @@
 ##' @keywords datasets
 ##' @name italy_sim
 ##' @usage data(italy_sim)
-##' @format A data frame with 200 rows and 6 variables
+##' @format A data frame with 2000 rows and 6 variables
 NULL

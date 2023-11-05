@@ -239,8 +239,8 @@ glgpm <- function(formula,
   res$D <- D
   res$coords <- coords
   res$ID_coords <- ID_coords
-  res$re <- re_unique_f
-  if(n_re>1) {
+  if(n_re>0) {
+    res$re <- re_unique_f
     res$ID_re <- as.data.frame(ID_re)
     colnames(res$ID_re) <- names_re
   }
@@ -1320,7 +1320,7 @@ print.summary.RiskMap <- function(x) {
     cat("Geostatistical linear model \n")
   }
 
-  cat("'Lower limit' and 'Upper limit' are the ",
+  cat("'Lower limit' and 'Upper limit' are the limits of the",
       x$conf_level*100,
       "% confidence level intervals \n", sep="")
 
