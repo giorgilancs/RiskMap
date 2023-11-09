@@ -9,11 +9,12 @@
 ##'  \item region the name of the region within which a given observation falls.
 ##'  \item province the name of the province within which a given observation falls.
 ##'  \item pop_dens the population density at the location of the observation.
+##'  \item ID_loc an ID identifying the location to which the observation belong.
 ##' }
 ##' The coordinate reference system of the data is 32634.
 ##' @docType data
 ##' @keywords datasets
 ##' @name italy_sim
 ##' @usage data(italy_sim)
-##' @format A data frame with 2000 rows and 6 variables
+##' @format A data frame with 2000 rows and 7 variables
 NULL
