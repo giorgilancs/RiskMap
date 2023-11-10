@@ -161,11 +161,18 @@ matern.hessian.phi <- function(U,phi,kappa) {
   hess.phi.mat
 }
 
-gp <- function (..., kappa = 0.5, nugget = T)
-{
+gp <- function (..., kappa = 0.5, nugget = 0) {
   vars <- as.list(substitute(list(...)))[-1]
   d <- length(vars)
   term <- NULL
+
+  if(length(nugget) > 0) {
+    if(!is.numeric(nugget) |
+       (is.numeric(nugget) & nugget <0)) stop("when 'nugget' is not NULL, this must be a positive
+                                 real number")
+  }
+
+
   if (d == 0) {
     term <- "sf"
   } else {
@@ -174,6 +181,7 @@ gp <- function (..., kappa = 0.5, nugget = T)
         term[i] <- deparse(vars[[i]], backtick = TRUE, width.cutoff = 500)
       }
     }
+
     for (i in 1:d) term[i] <- attr(terms(reformulate(term[i])),
                                    "term.labels")
   }
@@ -243,10 +251,15 @@ interpret.formula <- function(formula) {
   ns <- len.gp + len.re
   gp.spec <- eval(parse(text = terms[gp]), envir = p.env)
   re.spec <- eval(parse(text = terms[re]), envir = p.env)
-  pf <- paste(response, "~", paste(terms[-c(gp, re)], collapse = " + "))
+  if(length(terms[-c(gp, re)])>0) {
+    pf <- paste(response, "~", paste(terms[-c(gp, re)], collapse = " + "))
+  } else if (length(terms[-c(gp, re)])==0) {
+    pf <- paste(response, "~ 1")
+  }
   if (attr(tf, "intercept") == 0) {
     pf <- paste(pf, "-1", sep = "")
   }
+
   fake.formula <- pf
   fake.formula <- as.formula(fake.formula, p.env)
   ret <- list(pf = as.formula(pf, p.env),

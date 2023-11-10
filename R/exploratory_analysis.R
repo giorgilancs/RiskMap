@@ -17,6 +17,7 @@
 ##' @return \code{max} the maximum distance
 ##' @return \code{mean} the mean distance
 ##' @return \code{median} the minimum distance
+##' @export
 dist_summaries <- function(data,
                         convert_to_utm = TRUE,
                         scale_to_km = FALSE) {
