@@ -13,7 +13,7 @@ glgpm <- function(formula,
                  S_samples = NULL,
                  save_samples = F,
                  messages = TRUE,
-                 fix_sigma2_me = NULL,
+                 fix_var_me = NULL,
                  start_pars = list(beta = NULL,
                                    sigma2 = NULL,
                                    tau2 = NULL,
@@ -149,7 +149,7 @@ glgpm <- function(formula,
   fix_tau2 <- inter_f$gp.spec$nugget
 
   if(all(table(ID_coords)==1) &
-    is.null(fix_tau2) & is.null(fix_sigma2_me)) {
+    is.null(fix_tau2) & is.null(fix_var_me)) {
     stop("When there is only one observation per location, both the nugget and measurement error cannot
          be estimate. Consider removing either one of them. ")
   }
@@ -214,7 +214,7 @@ glgpm <- function(formula,
 
 
   if(family=="gaussian") {
-    if(is.null(fix_sigma2_me)) {
+    if(is.null(fix_var_me)) {
       if(is.null(start_pars$sigma2_me)) {
         start_pars$sigma2_me <- 1
       } else {
@@ -223,7 +223,7 @@ glgpm <- function(formula,
     }
     res <- glgpm_lm(y, D, coords, kappa = inter_f$gp.spec$kappa,
             ID_coords, ID_re, s_unique, re_unique,
-            fix_sigma2_me, fix_tau2,
+            fix_var_me, fix_tau2,
             start_beta = start_pars$beta,
             start_cov_pars = c(start_pars$sigma2,
                                start_pars$phi,
@@ -245,7 +245,7 @@ glgpm <- function(formula,
     colnames(res$ID_re) <- names_re
   }
   res$fix_tau2 <- fix_tau2
-  res$fix_sigma2_me <- fix_sigma2_me
+  res$fix_var_me <- fix_var_me
   res$formula <- formula
   res$family <- family
   res$crs <- crs
@@ -262,7 +262,7 @@ glgpm <- function(formula,
 ##' @importFrom maxLik maxBFGS
 ##' @importFrom Matrix Matrix forceSymmetric
 glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
-                    fix_sigma2_me, fix_tau2, start_beta, start_cov_pars, messages) {
+                    fix_var_me, fix_tau2, start_beta, start_cov_pars, messages) {
 
   m <- length(y)
   n <- nrow(coords)
@@ -274,9 +274,9 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
     n_re <- ncol(ID_re)
   }
 
-  if(!is.null(fix_sigma2_me)) {
-    if(fix_sigma2_me==0) {
-      fix_sigma2_me <- 10e-10
+  if(!is.null(fix_var_me)) {
+    if(fix_var_me==0) {
+      fix_var_me <- 10e-10
     }
   }
 
@@ -340,8 +340,8 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
       sigma2_re <- exp(par[ind_sigma2_re])
     }
 
-    if(!is.null(fix_sigma2_me)) {
-      omega2 <- fix_sigma2_me
+    if(!is.null(fix_var_me)) {
+      omega2 <- fix_var_me
     } else {
       omega2 <- exp(par[ind_omega2])
     }
@@ -404,8 +404,8 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
     if(n_re>0) {
       sigma2_re <- exp(par[ind_sigma2_re])
     }
-    if(!is.null(fix_sigma2_me)) {
-      omega2 <- fix_sigma2_me
+    if(!is.null(fix_var_me)) {
+      omega2 <- fix_var_me
     } else {
       omega2 <- exp(par[ind_omega2])
     }
@@ -497,7 +497,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
     }
 
 
-    if(is.null(fix_sigma2_me)) {
+    if(is.null(fix_var_me)) {
       der_omega2_q.f.y <- -as.numeric(sum(diff.y^2)/omega2^2)
       der_omega2_Sigma_star <- -C_g_m/omega2^2
       der_omega2_Sigma_tilde <- -Sigma_g_C_g_m/omega2^2
@@ -565,8 +565,8 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
     if(n_re>0) {
       sigma2_re <- exp(par[ind_sigma2_re])
     }
-    if(!is.null(fix_sigma2_me)) {
-      omega2 <- fix_sigma2_me
+    if(!is.null(fix_var_me)) {
+      omega2 <- fix_var_me
     } else {
       omega2 <- exp(par[ind_omega2])
     }
@@ -661,7 +661,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
     }
 
 
-    if(is.null(fix_sigma2_me)) {
+    if(is.null(fix_var_me)) {
       # beta - omega2
       der_omega2_Sigma_star <- -C_g_m/omega2^2
       M_beta_omega2 <- -Sigma_star_inv%*%
@@ -783,7 +783,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
              diff.y.tilde/(omega2^2))*sigma2*nu2)
     }
 
-    if(is.null(fix_sigma2_me)) {
+    if(is.null(fix_var_me)) {
       # sigma2 - omega2
       M2_sigma2_omega2 <- -Sigma_star_inv%*%
         (der_omega2_Sigma_star%*%Sigma_star_inv%*%der_Sigma_g_inv_sigma2_aux+
@@ -888,7 +888,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
              diff.y.tilde/(omega2^2))*phi*nu2)
     }
 
-    if(is.null(fix_sigma2_me)) {
+    if(is.null(fix_var_me)) {
       # phi - omega2
       M2_phi_omega2 <- -Sigma_star_inv%*%
         (der_omega2_Sigma_star%*%Sigma_star_inv%*%der_Sigma_g_inv_phi_aux+
@@ -949,7 +949,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
              M2_nu2%*%
              diff.y.tilde/(omega2^2))*nu2^2)
 
-      if(is.null(fix_sigma2_me)) {
+      if(is.null(fix_var_me)) {
         # nu2 - omega2
         M2_nu2_omega2 <- -Sigma_star_inv%*%
           (der_omega2_Sigma_star%*%Sigma_star_inv%*%der_Sigma_g_inv_nu2_aux+
@@ -992,7 +992,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
       }
     }
 
-    if(is.null(fix_sigma2_me)) {
+    if(is.null(fix_var_me)) {
       #omega2 - omega2
       der_omega2_q.f.y <- -as.numeric(sum(diff.y^2)/omega2^2)
       der2_omega2_q.f.y <- 2*as.numeric(sum(diff.y^2)/omega2^3)
@@ -1134,223 +1134,6 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
   return(out)
 }
 
-##' @title Extracting the parameter estimates from a model fit
-##' @description \code{coef} method for the class "RiskMap" that extracts the
-##' maximum likelihood estimates from the model fits obtained from the function
-##' \code{\link{glgpm}}
-##' @param object an object of class "RiskMap" obatained as result of a call to \code{\link{glgpm}}
-##' @return A vector of the maximum likelihood estimates
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @method coef RiskMap
-##' @export
-##'
-coef.RiskMap <- function(object) {
-  n_re <- length(object$re)
-  if(n_re > 0) {
-    re_names <- names(object$re)
-  }
-
-  p <- ncol(object$D)
-  ind_beta <- 1:p
-
-  names(object$estimate)[ind_beta] <- colnames(object$D)
-  ind_sigma2 <- p+1
-  names(object$estimate)[ind_sigma2] <- "sigma2"
-  ind_phi <- p+2
-  names(object$estimate)[ind_phi] <- "phi"
-
-  if(is.null(object$fix_tau2)) {
-    ind_tau2 <- p+3
-    names(object$estimate)[ind_tau2] <- "tau2"
-    object$estimate[ind_tau2] <- object$estimate[ind_tau2]+object$estimate[ind_sigma2]
-    if(is.null(object$fix_sigma2_me)) {
-      ind_sigma2_me <- p+4
-    } else {
-      ind_sigma2_me <- NULL
-    }
-    if(n_re>0) {
-      ind_sigma2_re <- (p+5):(p+4+n_re)
-    }
-  } else {
-    ind_tau2 <- NULL
-    if(is.null(object$fix_sigma2_me)) {
-      ind_sigma2_me <- p+3
-      names(object$estimate)[ind_sigma2_me] <- "sigma2_me"
-    } else {
-      ind_sigma2_me <- NULL
-    }
-    if(n_re>0) {
-      ind_sigma2_re <- (p+4):(p+3+n_re)
-    }
-  }
-  ind_sp <- c(ind_sigma2, ind_phi, ind_tau2)
-
-  n_p <- length(object$estimate)
-  object$estimate[-ind_beta] <- exp(object$estimate[-ind_beta])
-
-  if(n_re > 0) {
-    for(i in 1:n_re) {
-      names(object$estimate)[ind_sigma2_re[i]] <- paste(re_names[i],"_sigma2_re",sep="")
-    }
-  }
-
-  res <- object$estimate
-  return(res)
-}
-
-##' @title Summarizing model fits
-##' @description \code{summary} method for the class "RiskMap" that computes the standard errors and p-values of likelihood-based model fits.
-##' @param object an object of class "RiskMap" obatained as result of a call to \code{\link{glgpm}}
-##' @return A list with the following components
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @method summary RiskMap
-##' @export
-##'
-
-summary.RiskMap <- function(object, conf_level = 0.95) {
-
-  n_re <- length(object$re)
-  if(n_re > 0) {
-    re_names <- names(object$re)
-  }
-  alpha <- 1-conf_level
-
-  p <- ncol(object$D)
-  ind_beta <- 1:p
-
-  names(object$estimate)[ind_beta] <- colnames(object$D)
-  ind_sigma2 <- p+1
-  names(object$estimate)[ind_sigma2] <- "Spatial process var."
-  ind_phi <- p+2
-  names(object$estimate)[ind_phi] <- "Spatial corr. scale"
-
-  if(is.null(object$fix_tau2)) {
-    ind_tau2 <- p+3
-    names(object$estimate)[ind_tau2] <- "Variance of the nugget"
-    object$estimate[ind_tau2] <- object$estimate[ind_tau2]+object$estimate[ind_sigma2]
-    if(is.null(object$fix_sigma2_me)) {
-      ind_sigma2_me <- p+4
-    } else {
-      ind_sigma2_me <- NULL
-    }
-    if(n_re>0) {
-      ind_sigma2_re <- (p+5):(p+4+n_re)
-    }
-  } else {
-    ind_tau2 <- NULL
-    if(is.null(object$fix_sigma2_me)) {
-      ind_sigma2_me <- p+3
-      names(object$estimate)[ind_sigma2_me] <- "Measuremment error var."
-    } else {
-      ind_sigma2_me <- NULL
-    }
-    if(n_re>0) {
-      ind_sigma2_re <- (p+4):(p+3+n_re)
-    }
-  }
-  ind_sp <- c(ind_sigma2, ind_phi, ind_tau2)
-
-  n_p <- length(object$estimate)
-  object$estimate[-ind_beta] <- exp(object$estimate[-ind_beta])
-
-  if(n_re > 0) {
-    for(i in 1:n_re) {
-      names(object$estimate)[ind_sigma2_re[i]] <- paste(re_names[i]," (random eff. var.)",sep="")
-    }
-  }
-
-  J <- diag(1:n_p)
-  if(length(ind_tau2)>0) J[ind_tau2,ind_sigma2] <- 1
-
-  H <- solve(-object$covariance)
-  H_new <- t(J)%*%H%*%J
-
-  covariance_new <- solve(-H_new)
-
-  se_par <- sqrt(diag(covariance_new))
-  res <- list()
-  # Reg. coefficeints
-  zval <- object$estimate[ind_beta]/se_par[ind_beta]
-  res$reg_coef <- cbind(Estimate = object$estimate[ind_beta],
-                        'Lower limit' = object$estimate[ind_beta]-se_par[ind_beta]*qnorm(1-alpha/2),
-                        'Upper limit' = object$estimate[ind_beta]+se_par[ind_beta]*qnorm(1-alpha/2),
-                        StdErr = se_par[ind_beta],
-                        z.value = zval, p.value = 2 * pnorm(-abs(zval)))
-
-  # Measurement error variance (linear model)
-  if(object$call$family=="gaussian") {
-    if(is.null(object$fix_sigma2_me)) {
-      res$me <- cbind(Estimate = object$estimate[ind_sigma2_me],
-                      'Lower limit' = exp(log(object$estimate[ind_sigma2_me])-qnorm(1-alpha/2)*se_par[ind_sigma2_me]),
-                      'Upper limit' = exp(log(object$estimate[ind_sigma2_me])+qnorm(1-alpha/2)*se_par[ind_sigma2_me]))
-    } else {
-      res$me <- object$fix_sigma2_me
-    }
-  }
-
-  # Spatial process
-  res$sp <- cbind(Estimate = object$estimate[ind_sp],
-                  'Lower limit' = exp(log(object$estimate[ind_sp])-qnorm(1-alpha/2)*se_par[ind_sp]),
-                  'Upper limit' = exp(log(object$estimate[ind_sp])+qnorm(1-alpha/2)*se_par[ind_sp]))
-
-  if(!is.null(object$fix_tau2)) res$tau2 <- object$fix_tau2
-
-  # Random effects
-  if(n_re>0) {
-    res$ranef <- cbind(Estimate = object$estimate[ind_sigma2_re],
-                       'Lower limit' = exp(log(object$estimate[ind_sigma2_re])-qnorm(1-alpha/2)*se_par[ind_sigma2_re]),
-                       'Upper limit' = exp(log(object$estimate[ind_sigma2_re])+qnorm(1-alpha/2)*se_par[ind_sigma2_re]))
-  }
-
-  res$conf_level <- conf_level
-  res$family <- object$family
-  res$kappa <- object$kappa
-  res$log.lik <- object$log.lik
-  res$aic <- 2*length(res$estimate)-2*res$log.lik
-
-  class(res) <- "summary.RiskMap"
-  return(res)
-}
-
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @method print summary.RiskMap
-##' @export
-print.summary.RiskMap <- function(x) {
-  if(x$family=="gaussian") {
-    cat("Geostatistical linear model \n")
-  }
-
-  cat("'Lower limit' and 'Upper limit' are the limits of the",
-      x$conf_level*100,
-      "% confidence level intervals \n", sep="")
-
-
-  cat("\n Regression coefficients \n")
-  printCoefmat(x$reg_coef,P.values=TRUE,has.Pvalue=TRUE)
-
-  if(x$family=="gaussian") {
-    if(length(x$me)>1) {
-      cat("\n ")
-      printCoefmat(x$me, Pvalues = FALSE)
-    } else {
-      cat("\n Measurement error var. fixed at", x$me,"\n")
-    }
-  }
-
-  cat("\n Spatial Guassian process \n")
-  cat("Matern covariance parameters (kappa=",x$kappa,") \n",sep="")
-  printCoefmat(x$sp, Pvalues = FALSE)
-  if(!is.null(x$tau2)) cat("Variance of the nugget effect fixed at",x$tau2,"\n")
-
-
-  if(!is.null(x$ranef)) {
-    cat("\n Unstructured random effects \n")
-    printCoefmat(x$ranef, Pvalues = FALSE)
-  }
-  cat("\n Log-likelihood: ",x$log.lik,"\n",sep="")
-  cat("\n AIC: ",x$aic,"\n \n",sep="")
-
-}
 
 ##' @title Simulation from Generalized Linear Gaussian Process Models
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
@@ -1505,11 +1288,11 @@ glgpm_sim <- function(n_sim,
     if(is.null(model_fit$fix_tau2)) {
       ind_tau2 <- p+3
       tau2 <- par_hat[ind_tau2]
-      if(is.null(model_fit$fix_sigma2_me)) {
+      if(is.null(model_fit$fix_var_me)) {
         ind_sigma2_me <- p+4
         sigma2_me <- par_hat[ind_sigma2_me]
       } else {
-        sigma2_me <- model_fit$fix_sigma2_me
+        sigma2_me <- model_fit$fix_var_me
       }
       if(n_re>0) {
         ind_sigma2_re <- (p+5):(p+4+n_re)
@@ -1517,11 +1300,11 @@ glgpm_sim <- function(n_sim,
       }
     } else {
       tau2 <- model_fit$fix_tau2
-      if(is.null(model_fit$fix_sigma2_me)) {
+      if(is.null(model_fit$fix_var_me)) {
         ind_sigma2_me <- p+3
         sigma2_me <- par_hat[ind_sigma2_me]
       } else {
-        sigma2_me <- model_fit$fix_sigma2_me
+        sigma2_me <- model_fit$fix_var_me
       }
       if(n_re>0) {
         ind_sigma2_re <- (p+4):(p+3+n_re)
