@@ -21,11 +21,7 @@ glgpm <- function(formula,
                                    sigma2_me = NULL,
                                    sigma2_re = NULL)) {
 
-  if(family=="binomial" | family=="poisson") {
-    if(is.null(control_MCMC)) stop("if family='binomial' or family='poisson'
-                                   'control_MCMC' must be provided.")
-    if(class(control_MCMC)!="mcmc.RiskMap") stop("'control_MCMC' must be of class 'mcmc.PrevMap'")
-  }
+
 
   if(class(formula)!="formula") stop("'formula' must be a 'formula'
                                      object indicating the variables of the
@@ -67,12 +63,6 @@ glgpm <- function(formula,
   }
 
 
-  if(family=="binomial") {
-    if(is.null(distr_offset)) stop("if family='binomial', the argument 'm_offset'
-                               must be provided")
-    m_offset_ch <- as.charaster(as.name(subsitute(distr_offset)))
-  }
-
   kappa <- inter_f$gp.spec$kappa
   if(kappa < 0) stop("kappa must be positive.")
 
@@ -89,6 +79,21 @@ glgpm <- function(formula,
 
   # Extract covariates matrix
   D <- as.matrix(model.matrix(attr(mf,"terms"),data=data))
+
+  # Define distributional offset for Binomial and Poisson distributions
+  if(family=="binomial") {
+    if(is.null(distr_offset)) {
+      if(family == "binomial") {
+        units_m <- 1
+        warning("It is assumed that outcome consists of one binary observation per location")
+      }
+    } else {
+      units_m <- data[deparse(substitute(distr_offset))]
+      if(!is.numeric(units_m)) stop("the variable passed to `distr_offset` must be numeric")
+    }
+    if(any(y > units_m)) stop("The counts identified by the outcome variable cannot be larger
+                              than `distr_offset`")
+  }
 
   if(length(inter_f$re.spec) > 0) {
     hr_re <- inter_f$re.spec$term
@@ -232,7 +237,15 @@ glgpm <- function(formula,
                                start_pars$sigma2_me),
             messages = messages)
   } else if(family=="binomial" | family=="poisson") {
-
+    res <- glgpm_non_g(y, D, coords, units_m, kappa = inter_f$gp.spec$kappa,
+                        ID_coords, ID_re, s_unique, re_unique,
+                        fix_var_me, fix_tau2,
+                        start_beta = start_pars$beta,
+                        start_cov_pars = c(start_pars$sigma2,
+                                           start_pars$phi,
+                                           start_pars$tau2,
+                                           start_pars$sigma2_re),
+                        messages = messages)
   }
 
   res$y <- y
@@ -1433,4 +1446,134 @@ glgpm_sim <- function(n_sim,
     out$re_sim <- re_sim
   }
   return(out)
+}
+
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Peter J. Diggle \email{p.diggle@@lancaster.ac.uk}
+##' @importFrom maxLik maxBFGS
+maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.llik,
+                            sigma2_re = NULL,
+                            hessian=FALSE) {
+
+    Sigma.inv <- solve(Sigma)
+    n_loc <- nrow(Sigma)
+    n_re <- length(sigma2_re)
+    if(n_re > 0) {
+      n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[,i])))
+      ind_re <- list()
+      add_i <- 0
+      ID_re_conc <- NULL
+      for(i in 1:n_re) {
+        ind_re[[i]] <- (add_i+n_loc+1):(add_i+n_loc+n_dim_re[i])
+        ID_re_conc <- c(ID_re_conc, ID_re[,i])
+        add_i <- sum(n_dim_re[1:i])
+      }
+    }
+
+    integrand <- function(S_tot) {
+      S <- S_tot[1:n_loc]
+
+      q.f_S <- as.numeric(t(S)%*%Sigma.inv%*%(S))
+
+      q.f_re <- 0
+      if(n_re > 0) {
+        S_re <- NULL
+        S_re_list <- list()
+        for(i in 1:n_re) {
+          S_re_list[[i]] <- S_tot[ind_re[[i]]]
+          S_re <- c(S_re, S_re_list[[i]])
+          q.f_re <- q.f_re + sum(S_re_list[[i]]^2)/sigma2_re[i]
+        }
+      }
+
+      eta <- mu + S[ID_coords]
+      if(n_re > 0) {
+        eta <- eta + S_re[ID_re_conc]
+      }
+
+      if(poisson.llik) {
+        llik <- sum(y*eta-units_m*exp(eta))
+      } else {
+        llik <- sum(y*eta-units_m*log(1+exp(eta)))
+      }
+
+    out <- -0.5*q.f_S-0.5*q.f_re+llik
+    return(out)
+  }
+  grad.integrand <- function(S) {
+   diff.S <- S-mu
+   if(poisson.llik) {
+     h <- units.m*exp(S)
+   } else {
+     h <- units.m*exp(S)/(1+exp(S))
+   }
+   as.numeric(-Sigma.inv%*%diff.S+(y-h))
+  }
+
+  hessian.integrand <- function(S) {
+     if(poisson.llik) {
+       h1 <- units.m*exp(S)
+     } else {
+       h1 <- units.m*exp(S)/((1+exp(S))^2)
+     }
+     res <- -Sigma.inv
+     diag(res) <- diag(res)-h1
+     res
+   }
+
+   out <- list()
+   estim <- maxBFGS(function(x) integrand(x),function(x) grad.integrand(x),
+                     function(x) hessian.integrand(x),start=mu)
+
+  out$mode <- estim$estimate
+  if(hessian) {
+    out$hessian <- estim$hessian
+  } else {
+    out$Sigma.tilde <- solve(-estim$hessian)
+  }
+
+
+  return(out)
+}
+
+glgpm_non_g(y, D, coords, units_m, kappa,
+            par0=list(beta = start_pars$beta,
+                   sigma2 = start_pars$sigma2,
+                   phi = start_pars$phi,
+                   tau2 = start_pars$tau2,
+                   sigma2_re = start_pars$sigma2_re),
+            ID_coords, ID_re, s_unique, re_unique,
+            fix_tau2,
+            start_beta = start_pars$beta,
+            start_cov_pars = c(start_pars$sigma2,
+                               start_pars$phi,
+                               start_pars$tau2,
+                               start_pars$sigma2_re),
+            messages = messages) {
+
+  beta0 <- par0$beta
+  mu0 <- D%*%beta0
+
+  sigma2_0 <- par0$sigma2
+
+  phi0 <- par0$phi
+
+  tau2_0 <- par0$tau2
+
+  if(is.null(tau2_0)) tau2_0 <- fix_tau2
+
+  sigma2_re_0 <- par0$sigma2_re
+
+  n_re <- length(sigma2_re_0)
+
+  u = dist(coords)
+
+  Sigma0 <- sigma2_0*matern_cor(u = u, phi = phi0, kappa = kappa,
+                               return_sym_matrix = TRUE)
+
+  diag(Sigma0) <- diag(Sigma0) + tau2_0
+
+  if(n_re > 0) {
+    sigma2_re_0 <- par0$sigma2_re
+  }
 }
