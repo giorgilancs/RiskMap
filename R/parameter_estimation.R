@@ -10,6 +10,7 @@ glgpm <- function(formula,
                  crs = NULL, convert_to_crs = NULL,
                  scale_to_km = TRUE,
                  control_MCMC = NULL,
+                 par0=NULL,
                  S_samples = NULL,
                  save_samples = F,
                  messages = TRUE,
@@ -21,6 +22,7 @@ glgpm <- function(formula,
                                    sigma2_me = NULL,
                                    sigma2_re = NULL)) {
 
+  nong <- family=="binomial" | family=="poisson"
 
 
   if(class(formula)!="formula") stop("'formula' must be a 'formula'
@@ -218,7 +220,7 @@ glgpm <- function(formula,
 
 
 
-  if(family=="gaussian") {
+  if(!nong) {
     if(is.null(fix_var_me)) {
       if(is.null(start_pars$sigma2_me)) {
         start_pars$sigma2_me <- 1
@@ -236,8 +238,11 @@ glgpm <- function(formula,
                                start_pars$sigma2_re,
                                start_pars$sigma2_me),
             messages = messages)
-  } else if(family=="binomial" | family=="poisson") {
-    res <- glgpm_non_g(y, D, coords, units_m, kappa = inter_f$gp.spec$kappa,
+  } else if(nong) {
+    if(is.null(par0)) {
+      par0 <- start_pars
+    }
+    res <- glgpm_nong(y, D, coords, units_m, kappa = inter_f$gp.spec$kappa,
                         ID_coords, ID_re, s_unique, re_unique,
                         fix_var_me, fix_tau2,
                         start_beta = start_pars$beta,
@@ -1453,7 +1458,7 @@ glgpm_sim <- function(n_sim,
 ##' @importFrom maxLik maxBFGS
 maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.llik,
                             sigma2_re = NULL,
-                            hessian=FALSE) {
+                            hessian=FALSE, gradient=FALSE) {
 
     Sigma.inv <- solve(Sigma)
     n_loc <- nrow(Sigma)
@@ -1462,11 +1467,8 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
       n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[,i])))
       ind_re <- list()
       add_i <- 0
-      ID_re_conc <- NULL
       for(i in 1:n_re) {
         ind_re[[i]] <- (add_i+n_loc+1):(add_i+n_loc+n_dim_re[i])
-        ID_re_conc <- c(ID_re_conc, ID_re[,i])
-        add_i <- sum(n_dim_re[1:i])
       }
     }
 
@@ -1481,14 +1483,15 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
         S_re_list <- list()
         for(i in 1:n_re) {
           S_re_list[[i]] <- S_tot[ind_re[[i]]]
-          S_re <- c(S_re, S_re_list[[i]])
           q.f_re <- q.f_re + sum(S_re_list[[i]]^2)/sigma2_re[i]
         }
       }
 
       eta <- mu + S[ID_coords]
       if(n_re > 0) {
-        eta <- eta + S_re[ID_re_conc]
+        for(i in 1:n_re) {
+          eta <- eta + S_re_list[[i]][ID_re[,i]]
+        }
       }
 
       if(poisson.llik) {
@@ -1500,80 +1503,162 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
     out <- -0.5*q.f_S-0.5*q.f_re+llik
     return(out)
   }
-  grad.integrand <- function(S) {
-   diff.S <- S-mu
-   if(poisson.llik) {
-     h <- units.m*exp(S)
-   } else {
-     h <- units.m*exp(S)/(1+exp(S))
-   }
-   as.numeric(-Sigma.inv%*%diff.S+(y-h))
+
+
+  C_S <- t(sapply(1:n_loc,function(i) ID_coords==i))
+  n_tot <- n_loc
+  if(n_re > 0) n_tot <- n_tot + sum(n_dim_re)
+
+  if(n_re>0) {
+    C_re <- list()
+    C_S_re <- list()
+    C_re_re <- list()
+    for(j in 1:n_re){
+      C_S_re[[j]] <- array(FALSE,dim = c(n_loc, n_dim_re[j], n))
+      C_re[[j]] <- t(sapply(1:n_dim_re[j],function(i) ID_re[,j]==i))
+      for(l in 1:n_dim_re[j]) {
+        for(k in 1:n_loc) {
+          ind_kl <- which(ID_coords==k & ID_re[,j]==l)
+          if(length(ind_kl) > 0) {
+            C_S_re[[j]][k,l,ind_kl] <- TRUE
+          }
+        }
+      }
+
+      if(j < n_re) {
+        C_re_re[[j]] <- list()
+        counter <- 0
+        for(w in (j+1):n_re) {
+          counter <- counter+1
+          C_re_re[[j]][[counter]] <- array(FALSE,dim = c(n_dim_re[j], n_dim_re[w], n))
+          for(l in 1:n_dim_re[j]) {
+            for(k in 1:n_dim_re[w]) {
+              ind_lk <- which(ID_re[,j]==l & ID_re[,w]==k)
+              if(length(ind_kl) > 0) {
+                C_re_re[[j]][[counter]][l,k,ind_lk] <- TRUE
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
-  hessian.integrand <- function(S) {
-     if(poisson.llik) {
-       h1 <- units.m*exp(S)
-     } else {
-       h1 <- units.m*exp(S)/((1+exp(S))^2)
-     }
-     res <- -Sigma.inv
-     diag(res) <- diag(res)-h1
-     res
-   }
+  grad.integrand <- function(S_tot) {
+    S <- S_tot[1:n_loc]
 
-   out <- list()
-   estim <- maxBFGS(function(x) integrand(x),function(x) grad.integrand(x),
-                     function(x) hessian.integrand(x),start=mu)
+    if(n_re > 0) {
+      S_re <- NULL
+      S_re_list <- list()
+      for(i in 1:n_re) {
+        S_re_list[[i]] <- S_tot[ind_re[[i]]]
+      }
+    }
 
-  out$mode <- estim$estimate
+    eta <- mu + S[ID_coords]
+    if(n_re > 0) {
+      for(i in 1:n_re) {
+        eta <- eta + S_re_list[[i]][ID_re[,i]]
+      }
+    }
+
+    if(poisson.llik) {
+      h <- units_m*exp(eta)
+    } else {
+      h <- units_m*exp(eta)/(1+exp(eta))
+    }
+
+    out <- rep(NA,n_tot)
+    out[1:n_loc] <- as.numeric(-Sigma.inv%*%S+
+                              sapply(1:n_loc,function(i) sum((y-h)[C_S[i,]])))
+    if(n_re>0) {
+      for(j in 1:n_re) {
+        out[ind_re[[j]]] <- as.numeric(-S_re_list[[j]]/sigma2_re[[j]]+
+                                         sapply(1:n_dim_re[[j]],
+                                          function(i) sum((y-h)[C_re[[j]][i,]])))
+      }
+    }
+    return(out)
+  }
+
+  hessian.integrand <- function(S_tot) {
+    S <- S_tot[1:n_loc]
+
+
+    if(n_re > 0) {
+      S_re <- NULL
+      S_re_list <- list()
+      for(i in 1:n_re) {
+        S_re_list[[i]] <- S_tot[ind_re[[i]]]
+      }
+    }
+
+    eta <- mu + S[ID_coords]
+    if(n_re > 0) {
+      for(i in 1:n_re) {
+        eta <- eta + S_re_list[[i]][ID_re[,i]]
+      }
+    }
+
+    if(poisson.llik) {
+      h <- units_m*exp(eta)
+      h1 <- h
+    } else {
+      h <- units_m*exp(eta)/(1+exp(eta))
+      h1 <- h/(1+exp(eta))
+
+    }
+
+    out <- matrix(0,nrow = n_tot, ncol = n_tot)
+
+    out[1:n_loc, 1:n_loc] <-  -Sigma.inv
+    diag(out[1:n_loc, 1:n_loc]) <- diag(out[1:n_loc, 1:n_loc])+
+                                  -sapply(1:n_loc,function(i) sum(h1[C_S[i,]]))
+    if(n_re>0) {
+      for(j in 1:n_re) {
+        diag(out[ind_re[[j]], ind_re[[j]]]) <- -1/sigma2_re[j]
+        diag(out[ind_re[[j]], ind_re[[j]]]) <- diag(out[ind_re[[j]], ind_re[[j]]])+
+          -sapply(1:n_dim_re[j],function(i) sum(h1[C_re[[j]][i,]]))
+
+        out[1:n_loc,ind_re[[j]]]
+
+        for(k in 1:n_dim_re[[j]]) {
+          out[1:n_loc, ind_re[[j]]][,k] <- -sapply(1:n_loc,function(i) sum(h1[C_S_re[[j]][i,k,]]))
+          out[ind_re[[j]], 1:n_loc][k,] <- out[1:n_loc,ind_re[[j]]][,k]
+        }
+
+        if(j < n_re) {
+          counter <- 0
+          for(w in (j+1):n_re) {
+            counter <- counter + 1
+            for(k in 1:n_dim_re[[w]]) {
+              out[ind_re[[j]], ind_re[[w]]][,k] <- -sapply(1:n_dim_re[j],function(i) sum(h1[C_re_re[[j]][[counter]][i,k,]]))
+              out[ind_re[[w]], ind_re[[j]]][k,] <- out[ind_re[[j]], ind_re[[w]]][,k]
+            }
+          }
+        }
+      }
+    }
+    return(out)
+  }
+
+
+  estim <- nlminb(rep(0,n_tot),
+                  function(x) -integrand(x),
+                  function(x) -grad.integrand(x),
+                  function(x) -hessian.integrand(x))
+
+  out <- list()
+  out$mode <- estim$par
   if(hessian) {
-    out$hessian <- estim$hessian
+    out$hessian <- hessian.integrand(out$mode)
   } else {
-    out$Sigma.tilde <- solve(-estim$hessian)
+    out$Sigma.tilde <- solve(-hessian.integrand(out$mode))
   }
 
+  if(gradient) {
+    out$gradient <- grad.integrand(out$mode)
+  }
 
   return(out)
-}
-
-glgpm_non_g(y, D, coords, units_m, kappa,
-            par0=list(beta = start_pars$beta,
-                   sigma2 = start_pars$sigma2,
-                   phi = start_pars$phi,
-                   tau2 = start_pars$tau2,
-                   sigma2_re = start_pars$sigma2_re),
-            ID_coords, ID_re, s_unique, re_unique,
-            fix_tau2,
-            start_beta = start_pars$beta,
-            start_cov_pars = c(start_pars$sigma2,
-                               start_pars$phi,
-                               start_pars$tau2,
-                               start_pars$sigma2_re),
-            messages = messages) {
-
-  beta0 <- par0$beta
-  mu0 <- D%*%beta0
-
-  sigma2_0 <- par0$sigma2
-
-  phi0 <- par0$phi
-
-  tau2_0 <- par0$tau2
-
-  if(is.null(tau2_0)) tau2_0 <- fix_tau2
-
-  sigma2_re_0 <- par0$sigma2_re
-
-  n_re <- length(sigma2_re_0)
-
-  u = dist(coords)
-
-  Sigma0 <- sigma2_0*matern_cor(u = u, phi = phi0, kappa = kappa,
-                               return_sym_matrix = TRUE)
-
-  diag(Sigma0) <- diag(Sigma0) + tau2_0
-
-  if(n_re > 0) {
-    sigma2_re_0 <- par0$sigma2_re
-  }
 }
