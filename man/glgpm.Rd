@@ -17,7 +17,7 @@ glgpm(
   S_samples = NULL,
   save_samples = F,
   messages = TRUE,
-  fix_sigma2_me = NULL,
+  fix_var_me = NULL,
   start_pars = list(beta = NULL, sigma2 = NULL, tau2 = NULL, phi = NULL, sigma2_me =
     NULL, sigma2_re = NULL)
 )
