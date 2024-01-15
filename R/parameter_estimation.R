@@ -99,6 +99,7 @@ glgpm <- function(formula,
 
   if(length(inter_f$re.spec) > 0) {
     hr_re <- inter_f$re.spec$term
+    re_names <- inter_f$re.spec$term
   } else {
     hr_re <- NULL
   }
@@ -130,6 +131,8 @@ glgpm <- function(formula,
         re_unique_f[[names_re[i]]] <- re_unique[[names_re[i]]]
       }
     }
+    ID_re <- data.frame(ID_re)
+    colnames(ID_re) <- re_names
   } else {
     n_re <- 0
     re_unique <- NULL
@@ -244,7 +247,8 @@ glgpm <- function(formula,
     }
     res <- glgpm_nong(y, D, coords, units_m, kappa = inter_f$gp.spec$kappa,
                         ID_coords, ID_re, s_unique, re_unique,
-                        fix_var_me, fix_tau2,
+                        fix_tau2,
+                        par0 = par0,
                         start_beta = start_pars$beta,
                         start_cov_pars = c(start_pars$sigma2,
                                            start_pars$phi,
@@ -283,7 +287,6 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
                     fix_var_me, fix_tau2, start_beta, start_cov_pars, messages) {
 
   m <- length(y)
-  n <- nrow(coords)
   p <- ncol(D)
   U <- dist(coords)
   if(is.null(ID_re)) {
@@ -1456,12 +1459,17 @@ glgpm_sim <- function(n_sim,
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Peter J. Diggle \email{p.diggle@@lancaster.ac.uk}
 ##' @importFrom maxLik maxBFGS
-maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.llik,
+maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson_llik,
                             sigma2_re = NULL,
                             hessian=FALSE, gradient=FALSE) {
 
     Sigma.inv <- solve(Sigma)
     n_loc <- nrow(Sigma)
+    n <- length(y)
+    if((!is.null(ID_re) & is.null(sigma2_re)) | (is.null(ID_re) & !is.null(sigma2_re))) {
+      stop("To introduce unstructured random effects both `ID_re` and `sigma2_re`
+           must be provided.")
+    }
     n_re <- length(sigma2_re)
     if(n_re > 0) {
       n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[,i])))
@@ -1469,8 +1477,11 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
       add_i <- 0
       for(i in 1:n_re) {
         ind_re[[i]] <- (add_i+n_loc+1):(add_i+n_loc+n_dim_re[i])
+        if(i < n_re) add_i <- sum(n_dim_re[1:i])
       }
     }
+    n_tot <- n_loc
+    if(n_re > 0) n_tot <- n_tot + sum(n_dim_re)
 
     integrand <- function(S_tot) {
       S <- S_tot[1:n_loc]
@@ -1494,7 +1505,7 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
         }
       }
 
-      if(poisson.llik) {
+      if(poisson_llik) {
         llik <- sum(y*eta-units_m*exp(eta))
       } else {
         llik <- sum(y*eta-units_m*log(1+exp(eta)))
@@ -1506,8 +1517,6 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
 
 
   C_S <- t(sapply(1:n_loc,function(i) ID_coords==i))
-  n_tot <- n_loc
-  if(n_re > 0) n_tot <- n_tot + sum(n_dim_re)
 
   if(n_re>0) {
     C_re <- list()
@@ -1548,7 +1557,6 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
     S <- S_tot[1:n_loc]
 
     if(n_re > 0) {
-      S_re <- NULL
       S_re_list <- list()
       for(i in 1:n_re) {
         S_re_list[[i]] <- S_tot[ind_re[[i]]]
@@ -1562,7 +1570,7 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
       }
     }
 
-    if(poisson.llik) {
+    if(poisson_llik) {
       h <- units_m*exp(eta)
     } else {
       h <- units_m*exp(eta)/(1+exp(eta))
@@ -1575,7 +1583,7 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
       for(j in 1:n_re) {
         out[ind_re[[j]]] <- as.numeric(-S_re_list[[j]]/sigma2_re[[j]]+
                                          sapply(1:n_dim_re[[j]],
-                                          function(i) sum((y-h)[C_re[[j]][i,]])))
+                                          function(x) sum((y-h)[C_re[[j]][x,]])))
       }
     }
     return(out)
@@ -1600,7 +1608,7 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
       }
     }
 
-    if(poisson.llik) {
+    if(poisson_llik) {
       h <- units_m*exp(eta)
       h1 <- h
     } else {
@@ -1648,6 +1656,7 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
                   function(x) -grad.integrand(x),
                   function(x) -hessian.integrand(x))
 
+
   out <- list()
   out$mode <- estim$par
   if(hessian) {
@@ -1662,3 +1671,221 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson.l
 
   return(out)
 }
+
+
+Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
+                                  ID_coords, ID_re = NULL,
+                                  sigma2_re = NULL,
+                                  poisson_llik, control_mcmc,
+                                  Sigma_pd, mean_pd) {
+
+  Sigma.inv <- solve(Sigma)
+  n_loc <- nrow(Sigma)
+  n <- length(y)
+  if((!is.null(ID_re) & is.null(sigma2_re)) | (is.null(ID_re) & !is.null(sigma2_re))) {
+    stop("To introduce unstructured random effects both `ID_re` and `sigma2_re`
+           must be provided.")
+  }
+  n_re <- length(sigma2_re)
+  if(n_re > 0) {
+    n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[,i])))
+    ind_re <- list()
+    add_i <- 0
+    for(i in 1:n_re) {
+      ind_re[[i]] <- (add_i+n_loc+1):(add_i+n_loc+n_dim_re[i])
+      if(i < n_re) add_i <- sum(n_dim_re[1:i])
+    }
+  }
+  n_tot <- n_loc
+  if(n_re > 0) n_tot <- n_tot + sum(n_dim_re)
+
+  C_S <- t(sapply(1:n_loc,function(i) ID_coords==i))
+
+  if(n_re>0) {
+    C_re <- list()
+    C_S_re <- list()
+    C_re_re <- list()
+    for(j in 1:n_re){
+      C_S_re[[j]] <- array(FALSE,dim = c(n_loc, n_dim_re[j], n))
+      C_re[[j]] <- t(sapply(1:n_dim_re[j],function(i) ID_re[,j]==i))
+      for(l in 1:n_dim_re[j]) {
+        for(k in 1:n_loc) {
+          ind_kl <- which(ID_coords==k & ID_re[,j]==l)
+          if(length(ind_kl) > 0) {
+            C_S_re[[j]][k,l,ind_kl] <- TRUE
+          }
+        }
+      }
+
+      if(j < n_re) {
+        C_re_re[[j]] <- list()
+        counter <- 0
+        for(w in (j+1):n_re) {
+          counter <- counter+1
+          C_re_re[[j]][[counter]] <- array(FALSE,dim = c(n_dim_re[j], n_dim_re[w], n))
+          for(l in 1:n_dim_re[j]) {
+            for(k in 1:n_dim_re[w]) {
+              ind_lk <- which(ID_re[,j]==l & ID_re[,w]==k)
+              if(length(ind_kl) > 0) {
+                C_re_re[[j]][[counter]][l,k,ind_lk] <- TRUE
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  n_sim <- control_mcmc$n_sim
+  n <- length(y)
+  Sigma_pd_sroot <- t(chol(Sigma_pd))
+  A <- solve(Sigma_pd_sroot)
+
+  if(n_re == 0) {
+    Sigma_tot <- Sigma
+  } else {
+    Sigma_tot <- matrix(0, n_tot, n_tot)
+    Sigma_tot[1:n_loc, 1:n_loc] <- Sigma
+    for(i in 1:n_re) {
+      diag(Sigma_tot)[ind_re[[i]]] <- sigma2_re[i]
+    }
+  }
+  Sigma_w_inv <- solve(A%*%Sigma_tot%*%t(A))
+  mu_w <- -as.numeric(A%*%mean_pd)
+
+  cond.dens.W <- function(W, S_tot) {
+    S <- S_tot[1:n_loc]
+    if(n_re > 0) {
+      S_re <- NULL
+      S_re_list <- list()
+      for(i in 1:n_re) {
+        S_re_list[[i]] <- S_tot[ind_re[[i]]]
+      }
+    }
+
+    eta <- mu + S[ID_coords]
+    if(n_re > 0) {
+      for(i in 1:n_re) {
+        eta <- eta + S_re_list[[i]][ID_re[,i]]
+      }
+    }
+
+    if(poisson_llik) {
+      llik <- sum(y*eta-units_m*exp(eta))
+    } else {
+      llik <- sum(y*eta-units_m*log(1+exp(eta)))
+    }
+    diff_w <- W-mu_w
+    -0.5*as.numeric(t(diff_w)%*%Sigma_w_inv%*%diff_w)+
+    llik
+  }
+
+  lang.grad <- function(W, S_tot) {
+    diff.w <- W-mu_w
+    S <- S_tot[1:n_loc]
+    if(n_re > 0) {
+      S_re <- NULL
+      S_re_list <- list()
+      for(i in 1:n_re) {
+        S_re_list[[i]] <- S_tot[ind_re[[i]]]
+      }
+    }
+
+    eta <- mu + S[ID_coords]
+    if(n_re > 0) {
+      for(i in 1:n_re) {
+        eta <- eta + S_re_list[[i]][ID_re[,i]]
+      }
+    }
+
+    if(poisson_llik) {
+      der <- units_m*exp(eta)
+    } else {
+      der <- units_m*exp(eta)/(1+exp(eta))
+    }
+
+    grad_S_tot_r <- rep(NA,n_tot)
+    grad_S_tot_r[1:n_loc] <- as.numeric(sapply(1:n_loc,function(i) sum((y-der)[C_S[i,]])))
+    if(n_re>0) {
+      for(j in 1:n_re) {
+        grad_S_tot_r[ind_re[[j]]] <- as.numeric(sapply(1:n_dim_re[[j]],
+                                                function(x) sum((y-der)[C_re[[j]][x,]])))
+      }
+    }
+
+    out <- as.numeric(-Sigma_w_inv%*%(W-mu_w)+
+                   t(Sigma_pd_sroot)%*%grad_S_tot_r)
+  }
+
+  h <- control_mcmc$h
+  if(is.null(h)) h <- 1.65/(n_tot^(1/6))
+  burnin <- control_mcmc$burnin
+  thin <- control_mcmc$thin
+  c1.h <- control_mcmc$c1.h
+  c2.h <- control_mcmc$c2.h
+  W_curr <- rep(0,n_tot)
+  S_tot_curr <- as.numeric(Sigma_pd_sroot%*%W_curr+mean_pd)
+  mean_curr <- as.numeric(W_curr + (h^2/2)*lang.grad(W_curr, S_tot_curr))
+  lp_curr <- cond.dens.W(W_curr, S_tot_curr)
+  acc <- 0
+  n_samples <- (n_sim-burnin)/thin
+  sim <- matrix(NA,nrow=n_samples, ncol=n_tot)
+
+  if(messages) cat("\n Step 2: Conditional simulation (burnin=",
+                     control_mcmc$burnin,", thin=",control_mcmc$thin,"): \n \n",sep="")
+  h.vec <- rep(NA,n_sim)
+  acc_prob <- rep(NA,n_sim)
+  for(i in 1:n_sim) {
+    W_prop <- mean_curr+h*rnorm(n_tot)
+    S_tot_prop <-  as.numeric(Sigma_pd_sroot%*%W_prop+mean_pd)
+    mean_prop <- as.numeric(W_prop + (h^2/2)*lang.grad(W_prop, S_tot_prop))
+    lp_prop <- cond.dens.W(W_prop, S_tot_prop)
+
+    dprop_curr <- -sum((W_prop-mean_curr)^2)/(2*(h^2))
+    dprop_prop <- -sum((W_curr-mean_prop)^2)/(2*(h^2))
+
+    log_prob <- lp_prop+dprop_prop-lp_curr-dprop_curr
+
+    if(log(runif(1)) < log_prob) {
+      acc <- acc+1
+      W_curr <- W_prop
+      S_tot_curr <- S_tot_prop
+      lp_curr <- lp_prop
+      mean_curr <- mean_prop
+    }
+
+    if( i > burnin & (i-burnin)%%thin==0) {
+      sim[(i-burnin)/thin,] <- S_tot_curr
+      if(messages) {
+        step_i <- floor(i/n_sim*100)
+        prog <- paste("|",paste(rep("=",step_i),collapse=""),
+                      paste(rep(" ",100-step_i),collapse=""),"|",
+                      collapse="")
+        mxg <- paste("Simulation completion: ",prog, step_i,"%",collapse = "")
+        flush.console()
+        if(messages) cat(mxg,"\r")
+        flush.console()
+      }
+      if(messages) cat("\n")
+    }
+
+    acc_prob[i] <- acc/i
+    h.vec[i] <- h <- max(10e-20,h + c1.h*i^(-c2.h)*(acc/i-0.57))
+
+  }
+
+  out_sim <- list()
+  out_sim$samples <- list()
+  out_sim$samples$S <- sim[,1:n_loc]
+  if(n_re > 0) {
+    re_names <- colnames(ID_re)
+    for(i in 1:n_re) {
+      out_sim$samples[[re_names[i]]] <- sim[,ind_re[[i]]]
+    }
+  }
+  out_sim$tuning_par <- h.vec
+  out_sim$acceptance_prob <- acc_prob
+  class(out_sim) <- "mcmc.RiskMap"
+  return(out_sim)
+}
+
