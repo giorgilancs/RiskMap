@@ -281,7 +281,6 @@ glgpm <- function(formula,
 
 
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @importFrom maxLik maxBFGS
 ##' @importFrom Matrix Matrix forceSymmetric
 glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
                     fix_var_me, fix_tau2, start_beta, start_cov_pars, messages) {
@@ -1458,7 +1457,6 @@ glgpm_sim <- function(n_sim,
 
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Peter J. Diggle \email{p.diggle@@lancaster.ac.uk}
-##' @importFrom maxLik maxBFGS
 maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson_llik,
                             sigma2_re = NULL,
                             hessian=FALSE, gradient=FALSE) {
@@ -1887,5 +1885,422 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
   out_sim$acceptance_prob <- acc_prob
   class(out_sim) <- "mcmc.RiskMap"
   return(out_sim)
+}
+
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @importFrom Matrix Matrix forceSymmetric
+glgpm_nong(y, D, coords, units_m, kappa,
+           par0,
+           ID_coords, ID_re, s_unique, re_unique,
+           fix_tau2,
+           start_beta = start_pars$beta,
+           start_cov_pars = c(start_pars$sigma2,
+                              start_pars$phi,
+                              start_pars$tau2,
+                              start_pars$sigma2_re),
+           control_mcmc,
+           messages = TRUE) {
+
+  beta0 <- par0$beta
+  mu0 <- D%*%beta0
+
+  sigma2_0 <- par0$sigma2
+
+  phi0 <- par0$phi
+
+  tau2_0 <- par0$tau2
+
+  if(is.null(tau2_0)) tau2_0 <- fix_tau2
+
+  sigma2_re_0 <- par0$sigma2_re
+
+  n_loc <- nrow(coords)
+  n_re <- length(sigma2_re_0)
+  n_samples <- (control_mcmc$n_sim-control_mcmc$burnin)/control_mcmc$thin
+
+  u = dist(coords)
+
+  Sigma0 <- sigma2_0*matern_cor(u = u, phi = phi0, kappa = kappa,
+                                return_sym_matrix = TRUE)
+
+  diag(Sigma0) <- diag(Sigma0) + tau2_0
+
+  sigma2_re_0 <- par0$sigma2_re
+
+
+  cat("\n Step 1: Obtaining covariance matrix and mean for the proposal distribution of the MCMC \n \n")
+  out_maxim <-
+    maxim.integrand(y = y, units_m = units_m, Sigma = Sigma0, mu = mu0,
+                    ID_coords = ID_coords, ID_re = ID_re,
+                    sigma2_re = sigma2_re_0,
+                    poisson_llik = poisson_llik,
+                    hessian = FALSE, gradient = TRUE)
+
+  Sigma_pd <- out_maxim$Sigma.tilde
+  mean_pd <- out_maxim$mode
+
+  simulation <-
+    Laplace_sampling_MCMC(y = y, units_m = units_m, mu = mu0, Sigma = Sigma0,
+                          sigma2_re = sigma2_re_0,
+                          ID_coords = ID_coords, ID_re = ID_re,
+                          poisson_llik = poisson_llik, control_mcmc = control_mcmc,
+                          Sigma_pd = Sigma_pd, mean_pd = mean_pd)
+
+  S_tot_samples <- simulation$samples$S
+  p <- ncol(D)
+
+  ind_beta <- 1:p
+
+  ind_sigma2 <- p+1
+
+  ind_phi <- p+2
+
+  if(!is.null(fix_tau2)) {
+    if(n_re>0) ind_sigma2_re <- (p+2+1):(p+2+n_re)
+  } else {
+    ind_nu2 <- p+3
+    if(n_re>0) {
+      ind_sigma2_re <- (p+3+1):(p+3+n_re)
+      n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[,i])))
+    }
+  }
+
+  if(n_re> 0) {
+    for(i in 1:n_re) {
+      S_tot_samples <- cbind(S_tot_samples, simulation$samples[[i+1]])
+    }
+    ind_re <- list()
+    add_i <- 0
+    for(i in 1:n_re) {
+      ind_re[[i]] <- (add_i+n_loc+1):(add_i+n_loc+n_dim_re[i])
+      if(i < n_re) add_i <- sum(n_dim_re[1:i])
+    }
+  }
+
+
+  log.integrand <- function(S_tot, val) {
+    n <- length(y)
+    S <- S_tot[1:n_loc]
+
+    q.f_re <- 0
+    if(n_re > 0) {
+      S_re <- NULL
+      S_re_list <- list()
+      for(i in 1:n_re) {
+        S_re_list[[i]] <- S_tot[ind_re[[i]]]
+        q.f_re <- q.f_re + n_dim_re[i]*log(val$sigma2_re[i])+
+          sum(S_re_list[[i]]^2)/val$sigma2_re[i]
+      }
+    } else {
+      q.f_re <- 0
+    }
+
+    eta <- val$mu + S[ID_coords]
+    if(n_re > 0) {
+      for(i in 1:n_re) {
+        eta <- eta + S_re_list[[i]][ID_re[,i]]
+      }
+    }
+    if(poisson_llik) {
+      llik <-  sum(y*eta-units_m*exp(eta))
+    } else {
+      llik <- sum(y*eta-units_m*log(1+exp(eta)))
+    }
+    q.f_S <- n_loc*log(val$sigma2)+val$ldetR+t(S)%*%val$R.inv%*%S/val$sigma2
+    out <- -0.5*(q.f_S+q.f_re)+llik
+    return(out)
+  }
+
+  compute.log.f <- function(par,ldetR=NA,R.inv=NA) {
+    beta <- par[ind_beta]
+    sigma2 <- exp(par[ind_sigma2])
+    if(length(fix_tau2)>0) {
+      nu2 <- fix_tau2/sigma2
+    } else {
+      nu2 <- exp(par[ind_nu2])
+    }
+    phi <- exp(par[ind_phi])
+    val <- list()
+    val$sigma2 <- sigma2
+    val$mu <- as.numeric(D%*%beta)
+    if(n_re > 0) {
+      val$sigma2_re <- exp(par[ind_sigma2_re])
+    }
+    if(is.na(ldetR) & is.na(as.numeric(R.inv)[1])) {
+      R <- matern_cor(u, phi = phi, kappa=kappa,return_sym_matrix = TRUE)
+      diag(R) <- diag(R)+nu2
+      val$ldetR <- determinant(R)$modulus
+      val$R.inv <- solve(R)
+    } else {
+      val$ldetR <- ldetR
+      val$R.inv <- R.inv
+    }
+    sapply(1:n_samples,
+           function(i) log.integrand(S_tot_samples[i,],val))
+  }
+
+  par0_vec <- c(par0$beta, log(c(par0$sigma2, par0$phi)))
+
+  if(is.null(fix_tau2)) {
+    par0_vec <- c(par0_vec, log(par0$tau2/par0$sigma2))
+  }
+
+  if(n_re > 0) {
+    par0_vec <- c(par0_vec, log(par0$sigma2_re))
+  }
+
+  log.f.tilde <- compute.log.f(par0_vec)
+
+  MC.log.lik <- function(par) {
+    log(mean(exp(compute.log.f(par)-log.f.tilde)))
+  }
+
+  grad.MC.log.lik <- function(par) {
+    beta <- par[ind_beta]; mu <- as.numeric(D%*%beta)
+    sigma2 <- exp(par[ind_sigma2])
+    if(length(fix_tau2)>0) {
+      nu2 <- fix_tau2/sigma2
+    } else {
+      nu2 <- exp(par[ind_nu2])
+    }
+    phi <- exp(par[ind_phi])
+    if(n_re > 0) {
+      sigma2_re <- exp(par[ind_sigma2_re])
+    }
+
+    R <- matern_cor(u, phi = phi, kappa=kappa,return_sym_matrix = TRUE)
+    diag(R) <- diag(R)+nu2
+
+    R.inv <- solve(R)
+    ldetR <- determinant(R)$modulus
+
+    exp.fact <- exp(compute.log.f(par,ldetR,R.inv)-log.f.tilde)
+    L.m <- sum(exp.fact)
+    exp.fact <- exp.fact/L.m
+
+    R1.phi <- matern.grad.phi(u,phi,kappa)
+    m1.phi <- R.inv%*%R1.phi
+    t1.phi <- -0.5*sum(diag(m1.phi))
+    m2.phi <- m1.phi%*%R.inv; rm(m1.phi)
+
+    if(is.null(fix_tau2)){
+      t1.nu2 <- -0.5*sum(diag(R.inv))
+      m2.nu2 <- R.inv%*%R.inv
+    }
+
+    gradient.S <- function(S_tot) {
+      S <- S_tot[1:n_loc]
+
+      if(n_re > 0) {
+        S_re_list <- list()
+        for(i in 1:n_re) {
+          S_re_list[[i]] <- S_tot[ind_re[[i]]]
+        }
+      }
+
+      eta <- mu + S[ID_coords]
+      if(n_re > 0) {
+        for(i in 1:n_re) {
+          eta <- eta + S_re_list[[i]][ID_re[,i]]
+        }
+      }
+
+
+      if(poisson_llik) {
+        h <- units_m*exp(eta)
+      } else {
+        h <- units_m*exp(eta)/(1+exp(eta))
+      }
+
+      q.f_S <- t(S)%*%R.inv%*%S
+
+      grad.beta <-  t(D)%*%(y-h)
+
+      grad.log.sigma2 <- (-n_loc/(2*sigma2)+0.5*q.f_S/(sigma2^2))*sigma2
+
+      grad.log.phi <- (t1.phi+0.5*as.numeric(t(S)%*%m2.phi%*%(S))/sigma2)*phi
+
+      out <- c(grad.beta,grad.log.sigma2,grad.log.phi)
+
+      if(is.null(fix_tau2)) {
+        grad.log.nu2 <-  (t1.nu2+0.5*as.numeric(t(S)%*%m2.nu2%*%(S))/sigma2)*nu2
+        out <- c(out,grad.log.nu2)
+      }
+
+      if(n_re > 0) {
+        grad.log.sigma2_re <- rep(NA, n_re)
+        for(i in 1:n_re) {
+          grad.log.sigma2_re[i] <- (-n_dim_re[i]/(2*sigma2_re[i])+0.5*sum(S_re_list[[i]]^2)/
+                                      (sigma2_re[i]^2))*sigma2_re[i]
+        }
+        out <- c(out,grad.log.sigma2_re)
+      }
+      out
+    }
+    out <- rep(0,length(par))
+    for(i in 1:n_samples) {
+      out <- out + exp.fact[i]*gradient.S(S_tot_samples[i,])
+    }
+    out
+  }
+
+  hess.MC.log.lik <- function(par) {
+    beta <- par[ind_beta]; mu <- as.numeric(D%*%beta)
+    sigma2 <- exp(par[ind_sigma2])
+    if(!is.null(fix_tau2)) {
+      nu2 <- fix_tau2/sigma2
+    } else {
+      nu2 <- exp(par[ind_nu2])
+    }
+    phi <- exp(par[ind_phi])
+    if(n_re > 0) {
+      sigma2_re <- exp(par[ind_sigma2_re])
+    }
+
+    R <- matern_cor(u, phi = phi, kappa=kappa,return_sym_matrix = TRUE)
+    diag(R) <- diag(R)+nu2
+
+    R.inv <- solve(R)
+    ldetR <- determinant(R)$modulus
+
+    exp.fact <- exp(compute.log.f(par,ldetR,R.inv)-log.f.tilde)
+    L.m <- sum(exp.fact)
+    exp.fact <- exp.fact/L.m
+
+    R1.phi <- matern.grad.phi(u,phi,kappa)
+    m1.phi <- R.inv%*%R1.phi
+    t1.phi <- -0.5*sum(diag(m1.phi))
+    m2.phi <- m1.phi%*%R.inv; rm(m1.phi)
+
+    if(is.null(fix_tau2)){
+      t1.nu2 <- -0.5*sum(diag(R.inv))
+      m2.nu2 <- R.inv%*%R.inv
+      t2.nu2 <- 0.5*sum(diag(m2.nu2))
+      n2.nu2 <- 2*R.inv%*%m2.nu2
+      t2.nu2.phi <- 0.5*sum(diag(R.inv%*%R1.phi%*%R.inv))
+      n2.nu2.phi <- R.inv%*%(R.inv%*%R1.phi+
+                               R1.phi%*%R.inv)%*%R.inv
+    }
+
+    R2.phi <- matern.hessian.phi(u,phi,kappa)
+    t2.phi <- -0.5*sum(diag(R.inv%*%R2.phi-R.inv%*%R1.phi%*%R.inv%*%R1.phi))
+    n2.phi <- R.inv%*%(2*R1.phi%*%R.inv%*%R1.phi-R2.phi)%*%R.inv
+
+    H <- matrix(0,nrow=length(par),ncol=length(par))
+
+    hessian.S <- function(S_tot,ef) {
+      S <- S_tot[1:n_loc]
+
+      if(n_re > 0) {
+        S_re_list <- list()
+        for(i in 1:n_re) {
+          S_re_list[[i]] <- S_tot[ind_re[[i]]]
+        }
+      }
+
+      eta <- mu + S[ID_coords]
+      if(n_re > 0) {
+        for(i in 1:n_re) {
+          eta <- eta + S_re_list[[i]][ID_re[,i]]
+        }
+      }
+
+      if(poisson_llik) {
+        h <- units_m*exp(eta)
+        h1 <- h
+      } else {
+        h <- units_m*exp(eta)/(1+exp(eta))
+        h1 <- h/(1+exp(eta))
+      }
+
+      q.f_S <- t(S)%*%R.inv%*%S
+
+      grad.beta <-  t(D)%*%(y-h)
+
+      grad.log.sigma2 <- (-n_loc/(2*sigma2)+0.5*q.f_S/(sigma2^2))*sigma2
+
+      grad.log.phi <- (t1.phi+0.5*as.numeric(t(S)%*%m2.phi%*%(S))/sigma2)*phi
+
+      g <- c(grad.beta,grad.log.sigma2,grad.log.phi)
+      if(is.null(fix_tau2)) {
+        grad.log.nu2 <-  (t1.nu2+0.5*as.numeric(t(S)%*%m2.nu2%*%(S))/sigma2)*nu2
+        g <- c(g,grad.log.nu2)
+      }
+
+      if(n_re > 0) {
+        grad.log.sigma2_re <- rep(NA, n_re)
+        for(i in 1:n_re) {
+          grad.log.sigma2_re[i] <- (-n_dim_re[i]/(2*sigma2_re[i])+0.5*sum(S_re_list[[i]]^2)/
+                                      (sigma2_re[i]^2))*sigma2_re[i]
+        }
+        g <- c(g,grad.log.sigma2_re)
+      }
+
+      grad2.log.lsigma2.lsigma2 <- (n_loc/(2*sigma2^2)-q.f_S/(sigma2^3))*sigma2^2+
+        grad.log.sigma2
+
+      grad2.log.lphi.lphi <-(t2.phi-0.5*t(S)%*%n2.phi%*%(S)/sigma2)*phi^2+
+        grad.log.phi
+
+      H[ind_beta, ind_beta] <- -t(D)%*%(D*h1)
+      H[ind_sigma2, ind_sigma2] <-  grad2.log.lsigma2.lsigma2
+      H[ind_sigma2,ind_phi] <-
+        H[ind_phi, ind_sigma2] <- (grad.log.phi/phi-t1.phi)*(-phi)
+      H[ind_phi,ind_phi] <- grad2.log.lphi.lphi
+
+      if(is.null(fix_tau2)) {
+        grad2.log.lnu2.lnu2 <- (t2.nu2-0.5*t(S)%*%n2.nu2%*%(S)/sigma2)*nu2^2+
+          grad.log.nu2
+        grad2.log.lnu2.lphi <- (t2.nu2.phi-0.5*t(S)%*%n2.nu2.phi%*%(S)/sigma2)*phi*nu2
+        H[ind_sigma2,ind_nu2] <- H[ind_nu2,ind_sigma2] <- (grad.log.nu2/nu2-t1.nu2)*(-nu2)
+        H[ind_nu2,ind_nu2] <- grad2.log.lnu2.lnu2
+        H[ind_phi,ind_nu2] <- H[ind_nu2,ind_phi] <- grad2.log.lnu2.lphi
+      }
+
+      if(n_re > 0) {
+        grad2.log.sigma2_re <- rep(NA, n_re)
+        for(i in 1:n_re) {
+          grad2.log.sigma2_re[i] <- (n_dim_re[i]/(2*sigma2_re[i]^2)-
+                                       sum(S_re_list[[i]]^2)/(sigma2_re[i]^3))*
+            sigma2_re[i]^2+grad.log.sigma2_re[i]
+          H[ind_sigma2_re[i],ind_sigma2_re[i]] <- grad2.log.sigma2_re[i]
+
+        }
+      }
+      out <- list()
+      out$mat1<- ef*(g%*%t(g)+H)
+      out$g <- g*ef
+      out
+    }
+
+    a <- rep(0,length(par))
+    A <- matrix(0,length(par),length(par))
+    for(i in 1:n_samples) {
+      out.i <- hessian.S(S_tot_samples[i,],exp.fact[i])
+      a <- a+out.i$g
+      A <- A+out.i$mat1
+    }
+    (A-a%*%t(a))
+
+  }
+
+  start_cov_pars[-(1:2)] <- start_cov_pars[-(1:2)]/start_cov_pars[1]
+  start_par <- c(start_beta, log(start_cov_pars))
+
+  out <- list()
+  estim <- nlminb(start_par,
+                  function(x) -MC.log.lik(x),
+                  function(x) -grad.MC.log.lik(x),
+                  function(x) -hess.MC.log.lik(x),
+                  control=list(trace=1*messages))
+
+  out$estimate <- estim$par
+  out$grad.MLE <- grad.MC.log.lik(estim$par)
+  hess.MLE <- hess.MC.log.lik(estim$par)
+  out$covariance <- solve(-hess.MLE)
+  out$log.lik <- -estim$objective
+
+  class(out) <- "RiskMap"
+  return(out)
 }
 
