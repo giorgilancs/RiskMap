@@ -9,7 +9,7 @@ glgpm <- function(formula,
                  cov_offset = NULL,
                  crs = NULL, convert_to_crs = NULL,
                  scale_to_km = TRUE,
-                 control_MCMC = NULL,
+                 control_mcmc = set_control_mcmc(),
                  par0=NULL,
                  S_samples = NULL,
                  save_samples = F,
@@ -81,20 +81,23 @@ glgpm <- function(formula,
 
   # Extract covariates matrix
   D <- as.matrix(model.matrix(attr(mf,"terms"),data=data))
+  if(is.null(cov_offset)) cov_offset <- rep(0, n)
 
   # Define distributional offset for Binomial and Poisson distributions
-  if(family=="binomial") {
-    if(is.null(distr_offset)) {
-      if(family == "binomial") {
-        units_m <- 1
-        warning("It is assumed that outcome consists of one binary observation per location")
-      }
+  if(nong) {
+    do_name <- deparse(substitute(distr_offset))
+    if(do_name=="NULL") {
+      units_m <- 1
+      if(family=="binomial") warning("'distr_offset' is assumed to be 1 for all observations")
     } else {
-      units_m <- data[deparse(substitute(distr_offset))]
-      if(!is.numeric(units_m)) stop("the variable passed to `distr_offset` must be numeric")
+      units_m <- data[[do_name]]
     }
-    if(any(y > units_m)) stop("The counts identified by the outcome variable cannot be larger
-                              than `distr_offset`")
+    if(!is.numeric(units_m)) stop("the variable passed to `distr_offset` must be numeric")
+    if(family=="binomial" & any(y > units_m)) stop("The counts identified by the outcome variable cannot be larger
+                              than `distr_offset` in the case of a Binomial distribution")
+    if(class(control_mcmc)!="mcmc.RiskMap") step ("the argument passed to 'control_mcmc' must be an output
+                                                  from the function set_control_mcmc; see ?set_control_mcmc
+                                                  for more details")
   }
 
   if(length(inter_f$re.spec) > 0) {
@@ -174,7 +177,17 @@ glgpm <- function(formula,
 
 
   if(is.null(start_pars$beta)) {
-    start_pars$beta <- as.numeric(solve(t(D)%*%D)%*%t(D)%*%y)
+    if(family=="gaussian") {
+      start_pars$beta <- as.numeric(solve(t(D)%*%D)%*%t(D)%*%y)
+    } else if(family=="binomial") {
+      aux_data <- data.frame(y=y, units_m = units_m, D[,-1])
+      glm_fitted <- glm(cbind(y, units_m - y) ~ .,
+                        data = aux_data, family = binomial)
+      start_pars$beta <- stats::coef(glm_fitted)
+    } else if(family=="poisson") {
+      glm_fitted <- glm(inter_f$pf, data = data, family = poisson)
+      start_pars$beta <- stats::coef(glm_fitted)
+    }
   } else {
     if(length(start_pars$beta)!=ncol(D)) stop("number of starting values provided
                                               for 'beta' do not match the number of
@@ -244,16 +257,20 @@ glgpm <- function(formula,
   } else if(nong) {
     if(is.null(par0)) {
       par0 <- start_pars
+    } else {
+      if(length(par0$beta)!=ncol(D)) stop("the values passed to `beta` in par0 do not match the
+                                          variables specified in the formula")
     }
     res <- glgpm_nong(y, D, coords, units_m, kappa = inter_f$gp.spec$kappa,
                         ID_coords, ID_re, s_unique, re_unique,
-                        fix_tau2,
+                        fix_tau2, family = family,
                         par0 = par0,
                         start_beta = start_pars$beta,
                         start_cov_pars = c(start_pars$sigma2,
                                            start_pars$phi,
                                            start_pars$tau2,
                                            start_pars$sigma2_re),
+                        control_mcmc = control_mcmc,
                         messages = messages)
   }
 
@@ -1168,7 +1185,7 @@ glgpm_sim <- function(n_sim,
                       cov_offset = NULL,
                       crs = NULL, convert_to_crs = NULL,
                       scale_to_km = TRUE,
-                      control_MCMC = NULL,
+                      control_mcmc = NULL,
                       sim_pars = list(beta = NULL,
                                       sigma2 = NULL,
                                       tau2 = NULL,
@@ -1189,9 +1206,8 @@ glgpm_sim <- function(n_sim,
   inter_f <- interpret.formula(formula)
 
   if(family=="binomial" | family=="poisson") {
-    if(is.null(control_MCMC)) stop("if family='binomial' or family='poisson'
-                                   'control_MCMC' must be provided.")
-    if(class(control_MCMC)!="mcmc.RiskMap") stop("'control_MCMC' must be of class 'mcmc.PrevMap'")
+    if(is.null(control_mcmc)) stop("if family='binomial' or family='poisson'
+                                   'control_mcmc' must be provided")
   }
 
   if(class(formula)!="formula") stop("'formula' must be a 'formula'
@@ -1229,13 +1245,6 @@ glgpm_sim <- function(n_sim,
     } else if(is.na(st_crs(data))) {
       st_crs(data) <- crs
     }
-  }
-
-
-  if(family=="binomial") {
-    if(is.null(distr_offset)) stop("if family='binomial', the argument 'm_offset'
-                               must be provided")
-    m_offset_ch <- as.charaster(as.name(subsitute(distr_offset)))
   }
 
   kappa <- inter_f$gp.spec$kappa
@@ -1457,7 +1466,8 @@ glgpm_sim <- function(n_sim,
 
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Peter J. Diggle \email{p.diggle@@lancaster.ac.uk}
-maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson_llik,
+##' @export
+maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,family,
                             sigma2_re = NULL,
                             hessian=FALSE, gradient=FALSE) {
 
@@ -1503,9 +1513,9 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson_l
         }
       }
 
-      if(poisson_llik) {
+      if(family=="binomial") {
         llik <- sum(y*eta-units_m*exp(eta))
-      } else {
+      } else if(family=="poisson") {
         llik <- sum(y*eta-units_m*log(1+exp(eta)))
       }
 
@@ -1568,9 +1578,9 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson_l
       }
     }
 
-    if(poisson_llik) {
+    if(family=="binomial") {
       h <- units_m*exp(eta)
-    } else {
+    } else if(family=="poisson") {
       h <- units_m*exp(eta)/(1+exp(eta))
     }
 
@@ -1606,10 +1616,10 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson_l
       }
     }
 
-    if(poisson_llik) {
+    if(family=="binomial") {
       h <- units_m*exp(eta)
       h1 <- h
-    } else {
+    } else if(family=="poisson") {
       h <- units_m*exp(eta)/(1+exp(eta))
       h1 <- h/(1+exp(eta))
 
@@ -1670,12 +1680,12 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,poisson_l
   return(out)
 }
 
-
+##' @export
 Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
                                   ID_coords, ID_re = NULL,
                                   sigma2_re = NULL,
-                                  poisson_llik, control_mcmc,
-                                  Sigma_pd, mean_pd) {
+                                  family, control_mcmc,
+                                  Sigma_pd, mean_pd, messages = TRUE) {
 
   Sigma.inv <- solve(Sigma)
   n_loc <- nrow(Sigma)
@@ -1768,9 +1778,9 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
       }
     }
 
-    if(poisson_llik) {
+    if(family=="binomial") {
       llik <- sum(y*eta-units_m*exp(eta))
-    } else {
+    } else if(family=="poisson") {
       llik <- sum(y*eta-units_m*log(1+exp(eta)))
     }
     diff_w <- W-mu_w
@@ -1796,9 +1806,9 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
       }
     }
 
-    if(poisson_llik) {
+    if(family=="binomial") {
       der <- units_m*exp(eta)
-    } else {
+    } else if(family=="poisson") {
       der <- units_m*exp(eta)/(1+exp(eta))
     }
 
@@ -1889,10 +1899,36 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
 
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @importFrom Matrix Matrix forceSymmetric
-glgpm_nong(y, D, coords, units_m, kappa,
+##' @export
+set_control_mcmc <- function (n_sim  = 12000, burnin = 2000, thin = 10, h = NULL, c1.h = 0.01, c2.h = 1e-04)
+{
+
+  if (n_sim < burnin)
+    stop("n_sim cannot be smaller than burnin.")
+  if (thin <= 0)
+    stop("thin must be positive")
+  if ((n_sim - burnin)%%thin != 0)
+    stop("thin must be a divisor of (n_sim-burnin)")
+  if (!is.null(h) && h < 0)
+    stop("h must be positive.")
+  if (c1.h < 0)
+    stop("c1.h must be positive.")
+  if (c2.h < 0 | c2.h > 1)
+    stop("c2.h must be between 0 and 1.")
+  res <- list(n_sim = n_sim, burnin = burnin, thin = thin,
+              h = h, c1.h = c1.h, c2.h = c2.h)
+  class(res) <- "mcmc.RiskMap"
+  return(res)
+}
+
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @importFrom Matrix Matrix forceSymmetric
+##' @export
+glgpm_nong <-
+function(y, D, coords, units_m, kappa,
            par0,
            ID_coords, ID_re, s_unique, re_unique,
-           fix_tau2,
+           fix_tau2, family,
            start_beta = start_pars$beta,
            start_cov_pars = c(start_pars$sigma2,
                               start_pars$phi,
@@ -1933,7 +1969,7 @@ glgpm_nong(y, D, coords, units_m, kappa,
     maxim.integrand(y = y, units_m = units_m, Sigma = Sigma0, mu = mu0,
                     ID_coords = ID_coords, ID_re = ID_re,
                     sigma2_re = sigma2_re_0,
-                    poisson_llik = poisson_llik,
+                    family = family,
                     hessian = FALSE, gradient = TRUE)
 
   Sigma_pd <- out_maxim$Sigma.tilde
@@ -1943,8 +1979,9 @@ glgpm_nong(y, D, coords, units_m, kappa,
     Laplace_sampling_MCMC(y = y, units_m = units_m, mu = mu0, Sigma = Sigma0,
                           sigma2_re = sigma2_re_0,
                           ID_coords = ID_coords, ID_re = ID_re,
-                          poisson_llik = poisson_llik, control_mcmc = control_mcmc,
-                          Sigma_pd = Sigma_pd, mean_pd = mean_pd)
+                          family = family, control_mcmc = control_mcmc,
+                          Sigma_pd = Sigma_pd, mean_pd = mean_pd,
+                          messages = messages)
 
   S_tot_samples <- simulation$samples$S
   p <- ncol(D)
@@ -1956,7 +1993,10 @@ glgpm_nong(y, D, coords, units_m, kappa,
   ind_phi <- p+2
 
   if(!is.null(fix_tau2)) {
-    if(n_re>0) ind_sigma2_re <- (p+2+1):(p+2+n_re)
+    if(n_re>0) {
+      ind_sigma2_re <- (p+2+1):(p+2+n_re)
+      n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[,i])))
+    }
   } else {
     ind_nu2 <- p+3
     if(n_re>0) {
@@ -2001,9 +2041,9 @@ glgpm_nong(y, D, coords, units_m, kappa,
         eta <- eta + S_re_list[[i]][ID_re[,i]]
       }
     }
-    if(poisson_llik) {
+    if(family=="binomial") {
       llik <-  sum(y*eta-units_m*exp(eta))
-    } else {
+    } else if(family=="poisson") {
       llik <- sum(y*eta-units_m*log(1+exp(eta)))
     }
     q.f_S <- n_loc*log(val$sigma2)+val$ldetR+t(S)%*%val$R.inv%*%S/val$sigma2
@@ -2106,9 +2146,9 @@ glgpm_nong(y, D, coords, units_m, kappa,
       }
 
 
-      if(poisson_llik) {
+      if(family=="binomial") {
         h <- units_m*exp(eta)
-      } else {
+      } else if(family=="poisson") {
         h <- units_m*exp(eta)/(1+exp(eta))
       }
 
@@ -2205,10 +2245,10 @@ glgpm_nong(y, D, coords, units_m, kappa,
         }
       }
 
-      if(poisson_llik) {
+      if(family=="binomial") {
         h <- units_m*exp(eta)
         h1 <- h
-      } else {
+      } else if(family=="poisson") {
         h <- units_m*exp(eta)/(1+exp(eta))
         h1 <- h/(1+exp(eta))
       }
@@ -2303,4 +2343,3 @@ glgpm_nong(y, D, coords, units_m, kappa,
   class(out) <- "RiskMap"
   return(out)
 }
-

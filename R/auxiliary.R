@@ -303,24 +303,37 @@ coef.RiskMap <- function(object) {
     ind_tau2 <- p+3
     names(object$estimate)[ind_tau2] <- "tau2"
     object$estimate[ind_tau2] <- object$estimate[ind_tau2]+object$estimate[ind_sigma2]
-    if(is.null(object$fix_var_me)) {
-      ind_sigma2_me <- p+4
+    if(object$family=="gaussian") {
+      if(is.null(object$fix_var_me)) {
+        ind_sigma2_me <- p+4
+        if(n_re>0) ind_sigma2_re <- (p+5):(p+4+n_re)
+      } else {
+        ind_sigma2_me <- NULL
+        if(n_re>0) ind_sigma2_re <- (p+4):(p+3+n_re)
+      }
     } else {
       ind_sigma2_me <- NULL
-    }
-    if(n_re>0) {
-      ind_sigma2_re <- (p+5):(p+4+n_re)
+      if(n_re>0) ind_sigma2_re <- (p+4):(p+3+n_re)
     }
   } else {
     ind_tau2 <- NULL
-    if(is.null(object$fix_var_me)) {
-      ind_sigma2_me <- p+3
-      names(object$estimate)[ind_sigma2_me] <- "sigma2_me"
+    if(object$family=="gaussian") {
+      if(is.null(object$fix_var_me)) {
+        ind_sigma2_me <- p+3
+        names(object$estimate)[ind_sigma2_me] <- "sigma2_me"
+        if(n_re>0) {
+          ind_sigma2_re <- (p+4):(p+3+n_re)
+        }
+      } else {
+        ind_sigma2_me <- NULL
+        if(n_re>0) {
+          ind_sigma2_re <- (p+3):(p+2+n_re)
+        }
+      }
     } else {
-      ind_sigma2_me <- NULL
-    }
-    if(n_re>0) {
-      ind_sigma2_re <- (p+4):(p+3+n_re)
+      if(n_re>0) {
+        ind_sigma2_re <- (p+3):(p+2+n_re)
+      }
     }
   }
   ind_sp <- c(ind_sigma2, ind_phi, ind_tau2)
@@ -334,7 +347,15 @@ coef.RiskMap <- function(object) {
     }
   }
 
-  res <- object$estimate
+  res <- list()
+  res$beta <- object$estimate[ind_beta]
+  res$sigma2 <- as.numeric(object$estimate[ind_sigma2])
+  res$phi <- as.numeric(object$estimate[ind_phi])
+  if(object$family=="gaussian") {
+    if(!is.null(ind_sigma2_me)) res$sigma2_me <- as.numeric(object$estimate[ind_sigma2_me])
+  }
+  if(!is.null(ind_tau2)) res$tau2 <- object$estimate[ind_tau2]
+  if(n_re>0) res$sigma2_re <- as.numeric(object$estimate[ind_sigma2_re])
   return(res)
 }
 
@@ -368,24 +389,32 @@ summary.RiskMap <- function(object, conf_level = 0.95) {
     ind_tau2 <- p+3
     names(object$estimate)[ind_tau2] <- "Variance of the nugget"
     object$estimate[ind_tau2] <- object$estimate[ind_tau2]+object$estimate[ind_sigma2]
-    if(is.null(object$fix_var_me)) {
-      ind_sigma2_me <- p+4
+    if(family=="gaussian") {
+      if(is.null(object$fix_var_me)) {
+        ind_sigma2_me <- p+4
+      } else {
+        ind_sigma2_me <- NULL
+      }
+      if(n_re>0) {
+        ind_sigma2_re <- (p+5):(p+4+n_re)
+      }
     } else {
-      ind_sigma2_me <- NULL
-    }
-    if(n_re>0) {
-      ind_sigma2_re <- (p+5):(p+4+n_re)
+      ind_sigma2_re <- (p+4):(p+3+n_re)
     }
   } else {
     ind_tau2 <- NULL
-    if(is.null(object$fix_var_me)) {
-      ind_sigma2_me <- p+3
-      names(object$estimate)[ind_sigma2_me] <- "Measuremment error var."
+    if(object$family=="gaussian") {
+      if(is.null(object$fix_var_me)) {
+        ind_sigma2_me <- p+3
+        names(object$estimate)[ind_sigma2_me] <- "Measuremment error var."
+      } else {
+        ind_sigma2_me <- NULL
+      }
+      if(n_re>0) {
+        ind_sigma2_re <- (p+4):(p+3+n_re)
+      }
     } else {
-      ind_sigma2_me <- NULL
-    }
-    if(n_re>0) {
-      ind_sigma2_re <- (p+4):(p+3+n_re)
+      ind_sigma2_re <- (p+3):(p+2+n_re)
     }
   }
   ind_sp <- c(ind_sigma2, ind_phi, ind_tau2)
@@ -446,7 +475,7 @@ summary.RiskMap <- function(object, conf_level = 0.95) {
   res$family <- object$family
   res$kappa <- object$kappa
   res$log.lik <- object$log.lik
-  res$aic <- 2*length(res$estimate)-2*res$log.lik
+  if(object$family=="gaussian") res$aic <- 2*length(res$estimate)-2*res$log.lik
 
   class(res) <- "summary.RiskMap"
   return(res)
@@ -457,7 +486,11 @@ summary.RiskMap <- function(object, conf_level = 0.95) {
 ##' @export
 print.summary.RiskMap <- function(x) {
   if(x$family=="gaussian") {
-    cat("Geostatistical linear model \n")
+    cat("Linear geostatsitical model \n")
+  } else if(x$family=="binomial") {
+    cat("Binomial geostatistical linear model \n")
+  } else if(x$family=="poisson") {
+    cat("Poisson geostatistical linear model \n")
   }
 
   cat("'Lower limit' and 'Upper limit' are the limits of the ",
@@ -488,7 +521,7 @@ print.summary.RiskMap <- function(x) {
     printCoefmat(x$ranef, Pvalues = FALSE)
   }
   cat("\n Log-likelihood: ",x$log.lik,"\n",sep="")
-  cat("\n AIC: ",x$aic,"\n \n",sep="")
+  if(x$family=="gaussian") cat("\n AIC: ",x$aic,"\n \n",sep="")
 
 }
 
