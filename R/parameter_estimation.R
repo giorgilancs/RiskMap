@@ -81,7 +81,16 @@ glgpm <- function(formula,
 
   # Extract covariates matrix
   D <- as.matrix(model.matrix(attr(mf,"terms"),data=data))
-  if(is.null(cov_offset)) cov_offset <- rep(0, n)
+  if(is.null(cov_offset)) {
+    cov_offset <- rep(0, n)
+    cov_offset_used <- FALSE
+  } else {
+    if(!is.numeric(cov_offset)) stop("the variable passed to 'cov_offset'
+                                     must be numeric vector")
+    if(any(is.na(cov_offset))) stop("missing values not accepted in the offset")
+    if(length(cov_offset)!=n) stop("the offset values do not match the number of observations in the data")
+    cov_offset_used <- TRUE
+  }
 
   # Define distributional offset for Binomial and Poisson distributions
   if(nong) {
@@ -92,6 +101,7 @@ glgpm <- function(formula,
     } else {
       units_m <- data[[do_name]]
     }
+    if(is.integer(units_m)) units_m <- as.numeric(units_m)
     if(!is.numeric(units_m)) stop("the variable passed to `distr_offset` must be numeric")
     if(family=="binomial" & any(y > units_m)) stop("The counts identified by the outcome variable cannot be larger
                               than `distr_offset` in the case of a Binomial distribution")
@@ -162,7 +172,7 @@ glgpm <- function(formula,
   fix_tau2 <- inter_f$gp.spec$nugget
 
   if(all(table(ID_coords)==1) &
-    is.null(fix_tau2) & is.null(fix_var_me)) {
+    is.null(family=="gaussian" && fix_tau2) & is.null(fix_var_me)) {
     stop("When there is only one observation per location, both the nugget and measurement error cannot
          be estimate. Consider removing either one of them. ")
   }
@@ -181,11 +191,14 @@ glgpm <- function(formula,
       start_pars$beta <- as.numeric(solve(t(D)%*%D)%*%t(D)%*%y)
     } else if(family=="binomial") {
       aux_data <- data.frame(y=y, units_m = units_m, D[,-1])
-      glm_fitted <- glm(cbind(y, units_m - y) ~ .,
+      glm_fitted <- glm(cbind(y, units_m - y) ~ ., offset = cov_offset,
                         data = aux_data, family = binomial)
       start_pars$beta <- stats::coef(glm_fitted)
     } else if(family=="poisson") {
-      glm_fitted <- glm(inter_f$pf, data = data, family = poisson)
+      pf_aux <- stats::update(inter_f$pf, . ~ . + offset(log(units_m)) + offset(cov_offset))
+      data_aux <- data
+      data_aux$units_m <- units_m; data_aux$cov_offset <- cov_offset
+      glm_fitted <- glm(pf_aux, data = data_aux, family = poisson)
       start_pars$beta <- stats::coef(glm_fitted)
     }
   } else {
@@ -202,7 +215,7 @@ glgpm <- function(formula,
   }
 
   if(is.null(start_pars$phi)) {
-    start_pars$phi <- quantile(dist(coords),0.25)
+    start_pars$phi <- quantile(dist(coords),0.1)
   } else {
     if(start_pars$phi<0) stop("the starting value for phi must be positive")
   }
@@ -244,7 +257,7 @@ glgpm <- function(formula,
         if(start_pars$sigma2_me<0) stop("the starting value for sigma2_me must be positive")
       }
     }
-    res <- glgpm_lm(y, D, coords, kappa = inter_f$gp.spec$kappa,
+    res <- glgpm_lm(y = y-cov_offset, D, coords, kappa = inter_f$gp.spec$kappa,
             ID_coords, ID_re, s_unique, re_unique,
             fix_var_me, fix_tau2,
             start_beta = start_pars$beta,
@@ -261,10 +274,10 @@ glgpm <- function(formula,
       if(length(par0$beta)!=ncol(D)) stop("the values passed to `beta` in par0 do not match the
                                           variables specified in the formula")
     }
-    res <- glgpm_nong(y, D, coords, units_m, kappa = inter_f$gp.spec$kappa,
+    res <- glgpm_nong(y = y, D, coords, units_m, kappa = inter_f$gp.spec$kappa,
                         ID_coords, ID_re, s_unique, re_unique,
                         fix_tau2, family = family,
-                        par0 = par0,
+                        par0 = par0, cov_offset = cov_offset,
                         start_beta = start_pars$beta,
                         start_cov_pars = c(start_pars$sigma2,
                                            start_pars$phi,
@@ -292,6 +305,8 @@ glgpm <- function(formula,
   res$scale_to_km <- scale_to_km
   res$data_sf <- data
   res$kappa <- kappa
+  if(nong) res$units_m <- units_m
+  if(cov_offset_used) res$cov_offset <- cov_offset
   res$call <- match.call()
   return(res)
 }
@@ -300,7 +315,7 @@ glgpm <- function(formula,
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @importFrom Matrix Matrix forceSymmetric
 glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
-                    fix_var_me, fix_tau2, start_beta, start_cov_pars, messages) {
+                     fix_var_me, fix_tau2, start_beta, start_cov_pars, messages) {
 
   m <- length(y)
   p <- ncol(D)
@@ -391,7 +406,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
     Sigma_g_inv <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
     Sigma_g[1:n_dim_re[1], 1:n_dim_re[1]] <- sigma2*R
     Sigma_g_inv[1:n_dim_re[1], 1:n_dim_re[1]] <-
-    solve(R)/sigma2
+      solve(R)/sigma2
     if(n_re > 0) {
       for(j in 1:n_re) {
         select_col <- sum(n_dim_re[1:j])
@@ -400,7 +415,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
           sigma2_re[j]
 
         diag(Sigma_g_inv[select_col+1:n_dim_re[j+1], select_col+1:n_dim_re[j+1]]) <-
-        1/sigma2_re[j]
+          1/sigma2_re[j]
 
       }
     }
@@ -500,14 +515,14 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
     der_sigma2_Sigma_g <- der_sigma2_Sigma_g%*%C_g_m/omega2
     der_sigma2_trace <- sum(Matrix::diag(Sigma_tilde_inv%*%der_sigma2_Sigma_g))
     g[ind_sigma2] <- (-0.5*der_sigma2_trace-0.5*t(diff.y.tilde)%*%
-                      der_sigma2_aux%*%Sigma_star_inv%*%
-              diff.y.tilde/(omega2^2))*sigma2
+                        der_sigma2_aux%*%Sigma_star_inv%*%
+                        diff.y.tilde/(omega2^2))*sigma2
 
     der_R_phi <- matrix(0, nrow = sum(n_dim_re),
-                                     ncol = sum(n_dim_re))
+                        ncol = sum(n_dim_re))
     M.der.phi <- matern.grad.phi(U, phi, kappa)
     der_R_phi[1:n_dim_re[1], 1:n_dim_re[1]] <-
-    M.der.phi*sigma2
+      M.der.phi*sigma2
     der_Sigma_g_inv_phi <- Sigma_g_inv%*%der_R_phi%*%Sigma_g_inv
     der_phi_aux <- -Sigma_star_inv%*%der_Sigma_g_inv_phi
     der_phi_Sigma_g <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
@@ -519,7 +534,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
                  diff.y.tilde/(omega2^2))*phi
     if(is.null(fix_tau2)) {
       der_R_nu2 <- matrix(0, nrow = sum(n_dim_re),
-                                    ncol = sum(n_dim_re))
+                          ncol = sum(n_dim_re))
       diag(der_R_nu2[1:n_dim_re[1], 1:n_dim_re[1]]) <-
         sigma2
       der_Sigma_g_inv_nu2_aux <- Sigma_g_inv%*%der_R_nu2%*%Sigma_g_inv
@@ -578,8 +593,8 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
         sigma2_re_trace_aux[[i]] <- Sigma_tilde_inv%*%der_sigma2_re_Sigma_tilde[[i]]
         der_sigma2_re_trace[[i]] <- sum(Matrix::diag(sigma2_re_trace_aux[[i]]))
         g[ind_sigma2_re[i]] <- (-0.5*der_sigma2_re_trace[[i]]-0.5*t(diff.y.tilde)%*%
-                                 M_beta_sigma2_re[[i]]%*%
-                                 diff.y.tilde/(omega2^2))*sigma2_re[i]
+                                  M_beta_sigma2_re[[i]]%*%
+                                  diff.y.tilde/(omega2^2))*sigma2_re[i]
 
       }
     }
@@ -767,7 +782,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
     phi_trace_aux <- Sigma_tilde_inv%*%der_phi_Sigma_g
     der_phi_trace <- sum(Matrix::diag(phi_trace_aux))
     der_sigma2_phi_trace <- sum(Matrix::diag(Sigma_tilde_inv%*%der_sigma2_phi_Sigma_g-
-                                       sigma2_trace_aux%*%phi_trace_aux))
+                                               sigma2_trace_aux%*%phi_trace_aux))
 
     der_Sigma_g_inv_sigma2_phi_aux <-
       -Sigma_g_inv%*%(
@@ -797,7 +812,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
       nu2_trace_aux <- Sigma_tilde_inv%*%der_nu2_Sigma_g
       der_nu2_trace <- sum(Matrix::diag(nu2_trace_aux))
       der_sigma2_nu2_trace <- sum(Matrix::diag(Sigma_tilde_inv%*%der_sigma2_nu2_Sigma_g-
-                                         sigma2_trace_aux%*%nu2_trace_aux))
+                                                 sigma2_trace_aux%*%nu2_trace_aux))
 
       der_Sigma_g_inv_sigma2_nu2_aux <-
         -Sigma_g_inv%*%(
@@ -887,7 +902,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
         der2_R_phi)%*%Sigma_g_inv
     der2_phi_Sigma_g <- der2_R_phi%*%C_g_m/omega2
     der2_phi_trace <- sum(Matrix::diag(Sigma_tilde_inv%*%der2_phi_Sigma_g
-                               -phi_trace_aux%*%phi_trace_aux))
+                                       -phi_trace_aux%*%phi_trace_aux))
     der.phi <- (-0.5*der_phi_trace-0.5*t(diff.y.tilde)%*%
                   M_beta_phi%*%
                   diff.y.tilde/(omega2^2))*phi
@@ -1119,7 +1134,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
             der_sigma2_re_aux[[i]]-der2_Sigma_g_inv_sigma2_re_aux[[i]])%*%
           Sigma_star_inv
         der2_sigma2_re_trace[[i]] <- sum(Matrix::diag(-sigma2_re_trace_aux[[i]]%*%
-                                                sigma2_re_trace_aux[[i]]))
+                                                        sigma2_re_trace_aux[[i]]))
         H[ind_sigma2_re[i], ind_sigma2_re[i]] <-as.numeric(
           der.sigma2_re[[i]]+
             (-0.5*der2_sigma2_re_trace[[i]]+0.5*t(diff.y.tilde)%*%
@@ -1129,7 +1144,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
           for(j in (i+1):n_re) {
 
             der_sigma2_re_ij_trace <- sum(Matrix::diag(-sigma2_re_trace_aux[[i]]%*%
-                                                 sigma2_re_trace_aux[[j]]))
+                                                         sigma2_re_trace_aux[[j]]))
 
             M2_sigma2_re_ij <- -Sigma_star_inv%*%(
               -der_Sigma_g_inv_sigma2_re_aux[[i]]%*%der_sigma2_re_aux[[j]]+
@@ -1155,10 +1170,10 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
 
   out <- list()
   estim <- nlminb(start_par,
-                        function(x) -log.lik(x),
-                        function(x) -grad.log.lik(x),
-                        function(x) -hessian.log.lik(x),
-                        control=list(trace=1*messages))
+                  function(x) -log.lik(x),
+                  function(x) -grad.log.lik(x),
+                  function(x) -hessian.log.lik(x),
+                  control=list(trace=1*messages))
 
   out$estimate <- estim$par
   out$grad.MLE <- grad.log.lik(estim$par)
@@ -1513,9 +1528,9 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,family,
         }
       }
 
-      if(family=="binomial") {
+      if(family=="poisson") {
         llik <- sum(y*eta-units_m*exp(eta))
-      } else if(family=="poisson") {
+      } else if(family=="binomial") {
         llik <- sum(y*eta-units_m*log(1+exp(eta)))
       }
 
@@ -1578,9 +1593,9 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,family,
       }
     }
 
-    if(family=="binomial") {
+    if(family=="poisson") {
       h <- units_m*exp(eta)
-    } else if(family=="poisson") {
+    } else if(family=="binomial") {
       h <- units_m*exp(eta)/(1+exp(eta))
     }
 
@@ -1616,10 +1631,10 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,family,
       }
     }
 
-    if(family=="binomial") {
+    if(family=="poisson") {
       h <- units_m*exp(eta)
       h1 <- h
-    } else if(family=="poisson") {
+    } else if(family=="binomial") {
       h <- units_m*exp(eta)/(1+exp(eta))
       h1 <- h/(1+exp(eta))
 
@@ -1778,9 +1793,9 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
       }
     }
 
-    if(family=="binomial") {
+    if(family=="poisson") {
       llik <- sum(y*eta-units_m*exp(eta))
-    } else if(family=="poisson") {
+    } else if(family=="binomial") {
       llik <- sum(y*eta-units_m*log(1+exp(eta)))
     }
     diff_w <- W-mu_w
@@ -1806,9 +1821,9 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
       }
     }
 
-    if(family=="binomial") {
+    if(family=="poisson") {
       der <- units_m*exp(eta)
-    } else if(family=="poisson") {
+    } else if(family=="binomial") {
       der <- units_m*exp(eta)/(1+exp(eta))
     }
 
@@ -1863,16 +1878,16 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
     }
 
     if( i > burnin & (i-burnin)%%thin==0) {
-      sim[(i-burnin)/thin,] <- S_tot_curr
+      cnt <- (i-burnin)/thin
+      sim[cnt,] <- S_tot_curr
       if(messages) {
-        step_i <- floor(i/n_sim*100)
-        prog <- paste("|",paste(rep("=",step_i),collapse=""),
-                      paste(rep(" ",100-step_i),collapse=""),"|",
-                      collapse="")
-        mxg <- paste("Simulation completion: ",prog, step_i,"%",collapse = "")
-        flush.console()
-        if(messages) cat(mxg,"\r")
-        flush.console()
+        extra <- nchar('||100%')
+        width <- options()$width
+        step <- round(cnt / n_samples * (width - extra))
+        text <- sprintf('|%s%s|% 3s%%', strrep('=', step),
+                        strrep(' ', width - step - extra), round(cnt / n_samples * 100))
+        cat(text)
+        cat(if (cnt == n_samples) '\n' else '\014')
       }
       if(messages) cat("\n")
     }
@@ -1926,7 +1941,7 @@ set_control_mcmc <- function (n_sim  = 12000, burnin = 2000, thin = 10, h = NULL
 ##' @export
 glgpm_nong <-
 function(y, D, coords, units_m, kappa,
-           par0,
+           par0, cov_offset,
            ID_coords, ID_re, s_unique, re_unique,
            fix_tau2, family,
            start_beta = start_pars$beta,
@@ -1938,7 +1953,7 @@ function(y, D, coords, units_m, kappa,
            messages = TRUE) {
 
   beta0 <- par0$beta
-  mu0 <- D%*%beta0
+  mu0 <- D%*%beta0+cov_offset
 
   sigma2_0 <- par0$sigma2
 
@@ -2041,9 +2056,9 @@ function(y, D, coords, units_m, kappa,
         eta <- eta + S_re_list[[i]][ID_re[,i]]
       }
     }
-    if(family=="binomial") {
+    if(family=="poisson") {
       llik <-  sum(y*eta-units_m*exp(eta))
-    } else if(family=="poisson") {
+    } else if(family=="binomial") {
       llik <- sum(y*eta-units_m*log(1+exp(eta)))
     }
     q.f_S <- n_loc*log(val$sigma2)+val$ldetR+t(S)%*%val$R.inv%*%S/val$sigma2
@@ -2062,7 +2077,7 @@ function(y, D, coords, units_m, kappa,
     phi <- exp(par[ind_phi])
     val <- list()
     val$sigma2 <- sigma2
-    val$mu <- as.numeric(D%*%beta)
+    val$mu <- as.numeric(D%*%beta)+cov_offset
     if(n_re > 0) {
       val$sigma2_re <- exp(par[ind_sigma2_re])
     }
@@ -2096,7 +2111,7 @@ function(y, D, coords, units_m, kappa,
   }
 
   grad.MC.log.lik <- function(par) {
-    beta <- par[ind_beta]; mu <- as.numeric(D%*%beta)
+    beta <- par[ind_beta]; mu <- as.numeric(D%*%beta)+cov_offset
     sigma2 <- exp(par[ind_sigma2])
     if(length(fix_tau2)>0) {
       nu2 <- fix_tau2/sigma2
@@ -2146,9 +2161,9 @@ function(y, D, coords, units_m, kappa,
       }
 
 
-      if(family=="binomial") {
+      if(family=="poisson") {
         h <- units_m*exp(eta)
-      } else if(family=="poisson") {
+      } else if(family=="binomial") {
         h <- units_m*exp(eta)/(1+exp(eta))
       }
 
@@ -2185,7 +2200,7 @@ function(y, D, coords, units_m, kappa,
   }
 
   hess.MC.log.lik <- function(par) {
-    beta <- par[ind_beta]; mu <- as.numeric(D%*%beta)
+    beta <- par[ind_beta]; mu <- as.numeric(D%*%beta)+cov_offset
     sigma2 <- exp(par[ind_sigma2])
     if(!is.null(fix_tau2)) {
       nu2 <- fix_tau2/sigma2
@@ -2245,10 +2260,10 @@ function(y, D, coords, units_m, kappa,
         }
       }
 
-      if(family=="binomial") {
+      if(family=="poisson") {
         h <- units_m*exp(eta)
         h1 <- h
-      } else if(family=="poisson") {
+      } else if(family=="binomial") {
         h <- units_m*exp(eta)/(1+exp(eta))
         h1 <- h/(1+exp(eta))
       }

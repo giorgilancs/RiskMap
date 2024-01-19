@@ -389,7 +389,7 @@ summary.RiskMap <- function(object, conf_level = 0.95) {
     ind_tau2 <- p+3
     names(object$estimate)[ind_tau2] <- "Variance of the nugget"
     object$estimate[ind_tau2] <- object$estimate[ind_tau2]+object$estimate[ind_sigma2]
-    if(family=="gaussian") {
+    if(object$family=="gaussian") {
       if(is.null(object$fix_var_me)) {
         ind_sigma2_me <- p+4
       } else {
@@ -475,6 +475,7 @@ summary.RiskMap <- function(object, conf_level = 0.95) {
   res$family <- object$family
   res$kappa <- object$kappa
   res$log.lik <- object$log.lik
+  res$cov_offset_used <- !is.null(object$cov_offset)
   if(object$family=="gaussian") res$aic <- 2*length(res$estimate)-2*res$log.lik
 
   class(res) <- "summary.RiskMap"
@@ -500,6 +501,7 @@ print.summary.RiskMap <- function(x) {
 
   cat("\n Regression coefficients \n")
   printCoefmat(x$reg_coef,P.values=TRUE,has.Pvalue=TRUE)
+  if(x$cov_offset_used) cat("Offset included into the linear predictor \n")
 
   if(x$family=="gaussian") {
     if(length(x$me)>1) {
