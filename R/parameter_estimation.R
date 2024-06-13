@@ -9,7 +9,7 @@ glgpm <- function(formula,
                  cov_offset = NULL,
                  crs = NULL, convert_to_crs = NULL,
                  scale_to_km = TRUE,
-                 control_mcmc = set_control_mcmc(),
+                 control_mcmc = set_control_sim(),
                  par0=NULL,
                  S_samples = NULL,
                  save_samples = F,
@@ -82,14 +82,12 @@ glgpm <- function(formula,
   # Extract covariates matrix
   D <- as.matrix(model.matrix(attr(mf,"terms"),data=data))
   if(is.null(cov_offset)) {
-    cov_offset <- rep(0, n)
-    cov_offset_used <- FALSE
+    cov_offset <- 0
   } else {
     if(!is.numeric(cov_offset)) stop("the variable passed to 'cov_offset'
                                      must be numeric vector")
     if(any(is.na(cov_offset))) stop("missing values not accepted in the offset")
     if(length(cov_offset)!=n) stop("the offset values do not match the number of observations in the data")
-    cov_offset_used <- TRUE
   }
 
   # Define distributional offset for Binomial and Poisson distributions
@@ -106,7 +104,7 @@ glgpm <- function(formula,
     if(family=="binomial" & any(y > units_m)) stop("The counts identified by the outcome variable cannot be larger
                               than `distr_offset` in the case of a Binomial distribution")
     if(class(control_mcmc)!="mcmc.RiskMap") step ("the argument passed to 'control_mcmc' must be an output
-                                                  from the function set_control_mcmc; see ?set_control_mcmc
+                                                  from the function set_control_sim; see ?set_control_sim
                                                   for more details")
   }
 
@@ -157,6 +155,7 @@ glgpm <- function(formula,
   if(!is.null(convert_to_crs)) {
     if(!is.numeric(convert_to_crs)) stop("'convert_to_utm' must be a numeric object")
     data <- st_transform(data, crs = convert_to_crs)
+    crs <- convert_to_crs
   }
   if(messages) cat("The CRS used is", as.list(st_crs(data))$input, "\n")
 
@@ -172,7 +171,7 @@ glgpm <- function(formula,
   fix_tau2 <- inter_f$gp.spec$nugget
 
   if(all(table(ID_coords)==1) &
-    is.null(family=="gaussian" && fix_tau2) & is.null(fix_var_me)) {
+    is.null(family=="gaussian" && is.null(fix_tau2)) & is.null(fix_var_me)) {
     stop("When there is only one observation per location, both the nugget and measurement error cannot
          be estimate. Consider removing either one of them. ")
   }
@@ -191,7 +190,8 @@ glgpm <- function(formula,
       start_pars$beta <- as.numeric(solve(t(D)%*%D)%*%t(D)%*%y)
     } else if(family=="binomial") {
       aux_data <- data.frame(y=y, units_m = units_m, D[,-1])
-      glm_fitted <- glm(cbind(y, units_m - y) ~ ., offset = cov_offset,
+      if(length(cov_offset)==1) cov_offset_aux <- rep(cov_offset, n)
+      glm_fitted <- glm(cbind(y, units_m - y) ~ ., offset = cov_offset_aux,
                         data = aux_data, family = binomial)
       start_pars$beta <- stats::coef(glm_fitted)
     } else if(family=="poisson") {
@@ -300,13 +300,15 @@ glgpm <- function(formula,
   res$fix_var_me <- fix_var_me
   res$formula <- formula
   res$family <- family
+  if(!is.null(convert_to_crs)) {
+    crs <- convert_to_crs
+  }
   res$crs <- crs
-  res$convert_to_crs <- convert_to_crs
   res$scale_to_km <- scale_to_km
   res$data_sf <- data
   res$kappa <- kappa
   if(nong) res$units_m <- units_m
-  if(cov_offset_used) res$cov_offset <- cov_offset
+  res$cov_offset <- cov_offset
   res$call <- match.call()
   return(res)
 }
@@ -1380,6 +1382,7 @@ glgpm_sim <- function(n_sim,
   if(!is.null(convert_to_crs)) {
     if(!is.numeric(convert_to_crs)) stop("'convert_to_utm' must be a numeric object")
     data <- st_transform(data, crs = convert_to_crs)
+    crs <- convert_to_crs
   }
   if(messages) cat("The CRS used is", as.list(st_crs(data))$input, "\n")
 
@@ -1700,7 +1703,7 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
                                   ID_coords, ID_re = NULL,
                                   sigma2_re = NULL,
                                   family, control_mcmc,
-                                  Sigma_pd, mean_pd, messages = TRUE) {
+                                  Sigma_pd=NULL, mean_pd=NULL, messages = TRUE) {
 
   Sigma.inv <- solve(Sigma)
   n_loc <- nrow(Sigma)
@@ -1757,6 +1760,18 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
         }
       }
     }
+  }
+
+  if(is.null(Sigma_pd) | is.null(mean_pd)) {
+    out_maxim <-
+      maxim.integrand(y = y, units_m = units_m, Sigma = Sigma, mu = mu,
+                      ID_coords = ID_coords, ID_re = ID_re,
+                      sigma2_re = sigma2_re,
+                      family = family,
+                      hessian = FALSE, gradient = TRUE)
+
+    if(is.null(Sigma_pd)) Sigma_pd <- out_maxim$Sigma.tilde
+    if(is.null(mean_pd)) mean_pd <- out_maxim$mode
   }
 
   n_sim <- control_mcmc$n_sim
@@ -1854,7 +1869,7 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
   n_samples <- (n_sim-burnin)/thin
   sim <- matrix(NA,nrow=n_samples, ncol=n_tot)
 
-  if(messages) cat("\n Step 2: Conditional simulation (burnin=",
+  if(messages) cat("\n - Conditional simulation (burnin=",
                      control_mcmc$burnin,", thin=",control_mcmc$thin,"): \n \n",sep="")
   h.vec <- rep(NA,n_sim)
   acc_prob <- rep(NA,n_sim)
@@ -1880,16 +1895,6 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
     if( i > burnin & (i-burnin)%%thin==0) {
       cnt <- (i-burnin)/thin
       sim[cnt,] <- S_tot_curr
-      if(messages) {
-        extra <- nchar('||100%')
-        width <- options()$width
-        step <- round(cnt / n_samples * (width - extra))
-        text <- sprintf('|%s%s|% 3s%%', strrep('=', step),
-                        strrep(' ', width - step - extra), round(cnt / n_samples * 100))
-        cat(text)
-        cat(if (cnt == n_samples) '\n' else '\014')
-      }
-      if(messages) cat("\n")
     }
 
     acc_prob[i] <- acc/i
@@ -1915,23 +1920,28 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @importFrom Matrix Matrix forceSymmetric
 ##' @export
-set_control_mcmc <- function (n_sim  = 12000, burnin = 2000, thin = 10, h = NULL, c1.h = 0.01, c2.h = 1e-04)
+set_control_sim <- function (n_sim  = 12000, burnin = 2000, thin = 10, h = NULL, c1.h = 0.01, c2.h = 1e-04,
+                             linear_model = FALSE)
 {
 
-  if (n_sim < burnin)
+  if (!linear_model & n_sim < burnin)
     stop("n_sim cannot be smaller than burnin.")
-  if (thin <= 0)
+  if (!linear_model & thin <= 0)
     stop("thin must be positive")
-  if ((n_sim - burnin)%%thin != 0)
+  if (!linear_model & (n_sim - burnin)%%thin != 0)
     stop("thin must be a divisor of (n_sim-burnin)")
-  if (!is.null(h) && h < 0)
+  if (!linear_model & !is.null(h) && h < 0)
     stop("h must be positive.")
-  if (c1.h < 0)
+  if (!linear_model & c1.h < 0)
     stop("c1.h must be positive.")
-  if (c2.h < 0 | c2.h > 1)
+  if (!linear_model & (c2.h < 0 | c2.h > 1))
     stop("c2.h must be between 0 and 1.")
-  res <- list(n_sim = n_sim, burnin = burnin, thin = thin,
-              h = h, c1.h = c1.h, c2.h = c2.h)
+  if(linear_model) {
+    res <- list(n_sim = n_sim, linear_model = linear_model)
+  } else {
+    res <- list(n_sim = n_sim, burnin = burnin, thin = thin,
+                h = h, c1.h = c1.h, c2.h = c2.h, linear_model = linear_model)
+  }
   class(res) <- "mcmc.RiskMap"
   return(res)
 }
@@ -1979,7 +1989,7 @@ function(y, D, coords, units_m, kappa,
   sigma2_re_0 <- par0$sigma2_re
 
 
-  cat("\n Step 1: Obtaining covariance matrix and mean for the proposal distribution of the MCMC \n \n")
+  if(messages) cat("\n - Obtaining covariance matrix and mean for the proposal distribution of the MCMC \n \n")
   out_maxim <-
     maxim.integrand(y = y, units_m = units_m, Sigma = Sigma0, mu = mu0,
                     ID_coords = ID_coords, ID_re = ID_re,
