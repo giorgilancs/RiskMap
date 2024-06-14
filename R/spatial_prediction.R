@@ -1,8 +1,9 @@
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @importFrom Matrix Matrix forceSymmetric
 ##' @export
-pred_S <- function(object, predictors = NULL,
+pred_over_grid <- function(object,
                    grid_pred,
+                   predictors = NULL,
                    pred_cov_offset = NULL,
                    control_sim = set_control_sim(),
                    type = "marginal",
@@ -148,6 +149,7 @@ pred_S <- function(object, predictors = NULL,
   out$family <- object$family
   out$par_hat <- par_hat
   out$cov_offset <- pred_cov_offset
+  out$type <- type
   class(out) <- "RiskMap.pred.re"
   return(out)
 }
@@ -155,13 +157,12 @@ pred_S <- function(object, predictors = NULL,
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @importFrom Matrix Matrix forceSymmetric
 ##' @export
-pred_target <- function(object,
+pred_target_grid <- function(object,
                         include_covariates = TRUE,
                         include_nugget = FALSE,
                         include_cov_offset = FALSE,
                         f_target = NULL,
-                        pd_summary = NULL,
-                        shp = NULL) {
+                        pd_summary = NULL) {
   if(!inherits(object,
                what = "RiskMap.pred.re", which = FALSE)) {
     stop("The object passed to 'object' must be an output of
@@ -188,9 +189,15 @@ pred_target <- function(object,
   n_pred <- nrow(object$S_samples)
 
   out <- list()
+  if(length(object$mu_pred)==1 && object$mu_pred==0 &&
+     include_covariates) {
+    stop("Covariates have not been provided; re-run pred_over_grid
+         and provide the covariates through the argument 'predictors'")
+  }
   if(!include_covariates) {
     mu_target <- 0
   } else {
+
     if(is.null(object$mu_pred)) stop("the output obtained from 'pred_S' does not
                                      contain any covariates; if including covariates
                                      in the predictive target these shuold be included
@@ -235,15 +242,17 @@ pred_target <- function(object,
     }
   }
   out$grid_pred <- object$grid_pred
-  class(out) <- "RiskMap.pred.target"
+  out$f_target <- names(f_target)
+  out$pd_summary <- names(pd_summary)
+  class(out) <- "RiskMap.pred.target.grid"
   return(out)
 }
 
 ##' @importFrom terra rast plot as.data.frame
-##' @method coef RiskMap.pred.target
+##' @method plot RiskMap.pred.target.grid
 ##' @export
 ##'
-plot.RiskMap.pred.target <- function(object,
+plot.RiskMap.pred.target.grid <- function(object,
                                      which_target,
                                      which_summary, ...) {
   t_data.frame <-
@@ -255,3 +264,186 @@ plot.RiskMap.pred.target <- function(object,
   terra::plot(raster_out)
 }
 
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @export
+pred_target_shp <- function(object, shp, shp_target,
+                            weights = NULL,standardize_weights = FALSE,
+                            col_names=NULL,
+                            include_covariates = TRUE,
+                            include_nugget = FALSE,
+                            include_cov_offset = FALSE,
+                            f_target = NULL,
+                            pd_summary = NULL) {
+  if(!inherits(object,
+               what = "RiskMap.pred.re", which = FALSE)) {
+    stop("The object passed to 'object' must be an output of
+         the function 'pred_S'")
+  }
+  if(object$type!="joint") {
+    stop("To run predictions with a shape file, joint predictions must be used;
+         rerun 'pred_over_grid' and set type='joint'")
+  }
+
+  if(!inherits(shp,
+               what = c("sf","data.frame"), which = FALSE)) {
+    stop("The object passed to 'shp' must be an output of
+         the function 'pred_S'")
+  }
+
+  if(!inherits(shp_target,
+               what = c("function"), which = FALSE)) {
+    stop("The object passed to 'shp_function' must be a function
+         that takes as an input a vector and returns a single numeric value")
+  }
+  n_pred <- nrow(object$S_samples)
+
+  if(!is.null(weights)) {
+    if(!inherits(weights,
+                 what = c("numeric"), which = FALSE)) {
+      stop("The object passed to 'weights' must be a numeric
+         vector of weights with length equal to the number of
+           prediction locations")
+    }
+    if(length(weights)!=n_pred) stop("The value passed to 'weights' do not match
+                                   the prediction grid")
+    no_weights <- FALSE
+  } else {
+    weights <- rep(1,n_pred)
+    no_weights <- TRUE
+  }
+
+  if(is.null(object$par_hat$tau2) &
+     include_nugget) {
+    stop("The nugget cannot be included in the predictive target
+             because it was not included when fitting the model")
+  }
+
+  if(is.null(f_target)) {
+    f_target <- list(linear_target = function(x) x)
+  }
+
+  if(is.null(pd_summary)) {
+    pd_summary <- list(mean = mean, sd = sd)
+  }
+
+  n_summaries <- length(pd_summary)
+  n_f <- length(f_target)
+  n_samples <- ncol(object$S_samples)
+
+  if(length(object$mu_pred)==1 && object$mu_pred==0 &&
+     include_covariates) {
+    stop("Covariates have not been provided; re-run pred_over_grid
+         and provide the covariates through the argument 'predictors'")
+  }
+  if(!include_covariates) {
+    mu_target <- 0
+  } else {
+    if(is.null(object$mu_pred)) stop("the output obtained from 'pred_S' does not
+                                     contain any covariates; if including covariates
+                                     in the predictive target these shuold be included
+                                     when running 'pred_S'")
+    mu_target <- object$mu_pred
+  }
+
+  if(!include_cov_offset) {
+    cov_offset <- 0
+  } else {
+    if(length(object$cov_offset)==1) {
+      stop("No covariate offset was included in the model;
+           set include_cov_offset = FALSE, or refit the model and include
+           the covariate offset")
+    }
+    cov_offset <- object$cov_offset
+  }
+
+  if(include_nugget) {
+    Z_sim <- matrix(rnorm(n_samples*n_pred,
+                          sd = sqrt(object$par_hat$tau2)),
+                    ncol = n_samples)
+    object$S_samples <- object$S_samples+Z_sim
+  }
+
+  out <- list()
+  out$lp_samples <- sapply(1:n_samples,
+                           function(i)
+                             mu_target + cov_offset +
+                             object$S_samples[,i])
+  names_f <- names(f_target)
+  names_s <- names(pd_summary)
+  out$target <- list()
+
+  n_reg <- nrow(shp)
+  if(is.null(col_names)) {
+    shp$region <- paste("reg",1:n_reg, sep="")
+    col_names <- "region"
+    names_reg <- shp$region
+  } else {
+    names_reg <- shp[[col_names]]
+    if(n_reg != length(names_reg)) {
+      stop("The names in the column identified by 'col_names' do not
+         provide a unique set of names, but there are duplicates")
+    }
+  }
+
+  shp <- st_transform(shp, crs = st_crs(object$grid_pred)$input)
+  inter <- st_intersects(shp, object$grid_pred)
+
+  for(h in 1:n_reg) {
+    cat("Computing predictive target for:",shp[[col_names]][h])
+    if(length(inter[[h]])==0) {
+      stop(paste("No points on the grid fall within", shp[[col_names]][h]))
+    }
+    ind_grid_h <- inter[[h]]
+    if(standardize_weights & !no_weights) {
+      weights_h <- weights[ind_grid_h]/sum(weights[ind_grid_h])
+    } else {
+      weights_h <- weights[ind_grid_h]
+    }
+    for(i in 1:n_f) {
+
+      target_samples_i <-
+        apply(f_target[[i]](out$lp_samples[ind_grid_h,]),
+              2, function(x) shp_target(weights_h*x))
+      out$target[[paste(names_reg[h])]][[paste(names_f[i])]] <- list()
+      for(j in 1:n_summaries) {
+        out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]] <-
+          pd_summary[[j]](target_samples_i)
+      }
+    }
+    cat(" \n")
+  }
+
+  for(i in 1:n_f) {
+    for(j in 1:n_summaries) {
+      name_ij <- paste(names_f[i],"_",paste(names_s[j]),sep="")
+      shp[[name_ij]] <- rep(NA, n_reg)
+      for(h in 1:n_reg) {
+        which_reg <- which(shp[[col_names]]==names_reg[h])
+        shp[which_reg,][[name_ij]] <-
+          out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]]
+      }
+    }
+  }
+  out$shp <- shp
+  out$f_target <- names(f_target)
+  out$pd_summary <- names(pd_summary)
+  out$grid_pred <- object$grid_pred
+  class(out) <- "RiskMap.pred.target.shp"
+  return(out)
+}
+
+
+##' @importFrom ggplot2 ggplot geom_sf aes scale_fill_distiller
+##' @method plot RiskMap.pred.target.shp
+##' @export
+##'
+plot.RiskMap.pred.target.shp <- function(object,
+                                          which_target,
+                                          which_summary, ...) {
+  col_shp_name <- paste(which_target,"_",which_summary,sep="")
+
+  out <- ggplot(object$shp) +
+    geom_sf(aes(fill = .data[[col_shp_name]])) +
+    scale_fill_distiller(...)
+  return(out)
+}
