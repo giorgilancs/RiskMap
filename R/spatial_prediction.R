@@ -4,6 +4,7 @@
 pred_over_grid <- function(object,
                    grid_pred,
                    predictors = NULL,
+                   re_predictors = NULL,
                    pred_cov_offset = NULL,
                    control_sim = set_control_sim(),
                    type = "marginal",
@@ -44,6 +45,10 @@ pred_over_grid <- function(object,
     pred_cov_offset <- 0
   }
 
+  if(type!="marginal" & type!="joint") {
+    stop("the argument 'type' must be set to 'marginal' or 'joint'")
+  }
+
   inter_f <- interpret.formula(object$formula)
   inter_lt_f <- inter_f
   inter_lt_f$pf <- update(inter_lt_f$pf, NULL ~.)
@@ -58,6 +63,7 @@ pred_over_grid <- function(object,
 
     if(!is.data.frame(predictors)) stop("'predictors' must be an object of class 'data.frame'")
     if(nrow(predictors)!=n_pred) stop("the values provided for 'predictors' do not match the prediction grid passed to 'grid_pred'")
+
     mf_pred <- model.frame(inter_lt_f$pf,data=predictors, na.action = na.fail)
     D_pred <- as.matrix(model.matrix(attr(mf_pred,"terms"),data=predictors))
     if(ncol(D_pred)!=ncol(object$D)) stop("the provided variables in 'predictors' do not match the number of explanatory variables used to fit the model.")
@@ -69,6 +75,31 @@ pred_over_grid <- function(object,
     mu_pred <- 0
   }
 
+  n_re <- length(object$re)
+
+  if(!is.null(object$re)) {
+    if(!is.null(re_predictors)) {
+      if(!is.data.frame(re_predictors)) stop("'re_predictors' must be an object of class 'data.frame'")
+      if(nrow(re_predictors)!=n_pred) stop("the values provided for 'predictors' do not match the prediction grid passed to 'grid_pred'")
+      if(ncol(re_predictors)!=n_re) stop("the number of unstructured random effects provided in 're_predictors' does not match that of the fitted model")
+
+      D_re_pred <- list()
+      n_dim_re <- sapply(1:n_re, function(i) length(unique(object$ID_re[,i])))
+      for(i in 1:n_re) {
+        re_val_i <- re_predictors[,i]
+        D_re_pred[[i]] <- matrix(0,nrow = n_pred, ncol = n_dim_re[i])
+        for(j in 1:n_pred) {
+          ind_i <- which(as.character(re_val_i[j])==object$re[[i]])
+          D_re_pred[[i]][j, ind_i] <- 1
+        }
+      }
+    } else {
+      D_re_pred <- NULL
+    }
+  } else  {
+    D_re_pred <- NULL
+  }
+
   out <- list()
 
   out$mu_pred <- mu_pred
@@ -77,16 +108,11 @@ pred_over_grid <- function(object,
 
   if(object$scale_to_km) grp <- grp/1000
   U_pred <- t(sapply(1:n_pred,
-                     function(i) sqrt((object$coords[,1]-grp[i,1])^2+
-                                        (object$coords[,2]-grp[i,2])^2)))
+                     function(i) sqrt((object$coords[object$ID_coords,1]-grp[i,1])^2+
+                                        (object$coords[object$ID_coords,2]-grp[i,2])^2)))
   U <- dist(object$coords)
   C <- par_hat$sigma2*matern_cor(U_pred, phi = par_hat$phi,
                                  kappa = object$kappa)
-  Sigma <- par_hat$sigma2*matern_cor(U, phi = par_hat$phi,
-                                     kappa = object$kappa,
-                                     return_sym_matrix = TRUE)
-  Sigma_inv <- solve(Sigma)
-  A <- C%*%Sigma_inv
   mu <- as.numeric(object$D%*%par_hat$beta)
 
   if(control_sim$linear_model) {
@@ -96,6 +122,8 @@ pred_over_grid <- function(object,
   }
 
   if(object$family!="gaussian") {
+    A <- C%*%Sigma_inv
+
     simulation <-
       Laplace_sampling_MCMC(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
                             sigma2_re = par_hat$sigma2_re,
@@ -123,9 +151,80 @@ pred_over_grid <- function(object,
                                 Sigma_cond_sroot%*%rnorm(n_pred))
     }
   } else {
-    mu_cond_S <- as.numeric(A%*%(object$y-mu))
+    R <- matern_cor(U,phi = par_hat$phi, kappa=object$kappa,return_sym_matrix = TRUE)
+    diff.y <- object$y-mu
+    if(!is.null(object$fix_tau2)) {
+      nu2 <- object$fix_tau2/par_hat$sigma2
+    } else {
+      nu2 <- par_hat$tau2/par_hat$sigma2
+    }
+    diag(R) <- diag(R)+nu2
+
+    if(!is.null(object$fix_var_me) && object$fix_var_me>0 ||
+       is.null(object$fix_var_me)) {
+      m <- length(object$y)
+      s_unique <- unique(object$ID_coords)
+
+      ID_g <- as.matrix(cbind(object$ID_coords, object$ID_re))
+
+      n_dim_re <- sapply(1:(n_re+1), function(i) length(unique(ID_g[,i])))
+      C_g <- matrix(0, nrow = m, ncol = sum(n_dim_re))
+
+      for(i in 1:m) {
+        ind_s_i <- which(s_unique==ID_g[i,1])
+        C_g[i,1:n_dim_re[1]][ind_s_i] <- 1
+      }
+
+      re_unique <- object$re
+      if(n_re>0) {
+        for(j in 1:n_re) {
+          select_col <- sum(n_dim_re[1:j])
+
+          for(i in 1:m) {
+            ind_re_j_i <- which(re_unique[[j]]==ID_g[i,j+1])
+            C_g[i,select_col+1:n_dim_re[j+1]][ind_re_j_i] <- 1
+          }
+        }
+      }
+      C_g <- Matrix(C_g, sparse = TRUE, doDiag = FALSE)
+      C_g_m <- Matrix::t(C_g)%*%C_g
+      C_g_m <- forceSymmetric(C_g_m)
+
+
+      Sigma_g <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
+      Sigma_g_inv <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
+      Sigma_g[1:n_dim_re[1], 1:n_dim_re[1]] <- par_hat$sigma2*R
+      Sigma_g_inv[1:n_dim_re[1], 1:n_dim_re[1]] <-
+        solve(R)/par_hat$sigma2
+      if(n_re > 0) {
+        for(j in 1:n_re) {
+          select_col <- sum(n_dim_re[1:j])
+
+          diag(Sigma_g[select_col+1:n_dim_re[j+1], select_col+1:n_dim_re[j+1]]) <-
+            par_hat$sigma2_re[j]
+
+          diag(Sigma_g_inv[select_col+1:n_dim_re[j+1], select_col+1:n_dim_re[j+1]]) <-
+            1/par_hat$sigma2_re[j]
+
+        }
+      }
+
+      Sigma_star <- Sigma_g_inv+C_g_m/par_hat$sigma2_me
+      Sigma_star_inv <- forceSymmetric(Matrix::solve(Sigma_star))
+
+      B <- -C_g%*%Sigma_star_inv%*%Matrix::t(C_g)/(par_hat$sigma2_me^2)
+      diag(B) <- Matrix::diag(B) + 1/par_hat$sigma2_me
+      A <- C%*%B
+    } else {
+      Sigma <- par_hat$sigma2*R
+      Sigma_inv <- solve(Sigma)
+      A <- C%*%Sigma_inv
+    }
+
+    mu_cond_S <- as.numeric(A%*%diff.y)
+
     if(type=="marginal") {
-      sd_cond_S <- sqrt(par_hat$sigma2-diag(A%*%t(C)))
+      sd_cond_S <- sqrt(par_hat$sigma2-Matrix::diag(A%*%t(C)))
       out$S_samples <- sapply(1:n_samples,
                               function(i)
                                 mu_cond_S+
@@ -145,6 +244,27 @@ pred_over_grid <- function(object,
     }
   }
 
+  if(n_re>0) {
+    out$re <- list()
+    out$re$D_pred <- D_re_pred
+    re_names <- colnames(object$ID_re)
+    for(i in 1:n_re) {
+      C_re <- matrix(0, nrow=n_pred,ncol=n_dim_re[1+i])
+      for(j in 1:n_dim_re[1+i]) {
+        C_re <- matrix(0, ncol= m)
+        ind_ij <- which(object$ID_re[[i]]==re_unique[[i]][j])
+        C_re[,ind_ij] <- par_hat$sigma2_re[i]
+        A_re <- C_re%*%B
+
+        re_mu_cond <- as.numeric(A_re%*%diff.y)
+        re_sd_cond <- as.numeric(sqrt(par_hat$sigma2_re[i]-A_re%*%t(C_re)))
+
+        out$re[[paste(re_names[i])]][[paste(object$re[[i]][j])]] <-
+          list(mu_cond = re_mu_cond, sd_cond = re_sd_cond)
+      }
+    }
+  }
+
   out$inter_f <- inter_f
   out$family <- object$family
   out$par_hat <- par_hat
@@ -161,6 +281,7 @@ pred_target_grid <- function(object,
                         include_covariates = TRUE,
                         include_nugget = FALSE,
                         include_cov_offset = FALSE,
+                        include_re = FALSE,
                         f_target = NULL,
                         pd_summary = NULL) {
   if(!inherits(object,
@@ -188,12 +309,21 @@ pred_target_grid <- function(object,
   n_samples <- ncol(object$S_samples)
   n_pred <- nrow(object$S_samples)
 
+  n_re <- length(object$re)-1
+
   out <- list()
   if(length(object$mu_pred)==1 && object$mu_pred==0 &&
      include_covariates) {
     stop("Covariates have not been provided; re-run pred_over_grid
          and provide the covariates through the argument 'predictors'")
   }
+
+  if(n_re==0 &&
+     include_re) {
+    stop("The categories of the randome effects variables have not been provided;
+         re-run pred_over_grid and provide the covariates through the argument 're_predictors'")
+  }
+
   if(!include_covariates) {
     mu_target <- 0
   } else {
@@ -228,6 +358,22 @@ pred_target_grid <- function(object,
                            function(i)
                              mu_target + cov_offset +
                              object$S_samples[,i])
+
+  if(include_re) {
+    for(i in 1:n_re) {
+      dim_re_i <- ncol(object$re$D_pred[[i]])
+      re_i_samples <- matrix(0, nrow=n_pred, ncol=n_samples)
+      for(j in 1:dim_re_i) {
+        if(object$family=="gaussian") {
+          samples_ij <- rnorm(n_samples,
+                              mean = object$re[[i+1]][[j]]$mu_cond,
+                              sd = object$re[[i+1]][[j]]$sd_cond)
+          #object$re$D_pred[[i]][,j]
+        }
+      }
+    }
+  }
+
   names_f <- names(f_target)
   names_s <- names(pd_summary)
   out$target <- list()

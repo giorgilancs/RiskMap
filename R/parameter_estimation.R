@@ -302,6 +302,8 @@ glgpm <- function(formula,
   res$family <- family
   if(!is.null(convert_to_crs)) {
     crs <- convert_to_crs
+  } else {
+    crs <- sf::st_crs(data)$input
   }
   res$crs <- crs
   res$scale_to_km <- scale_to_km
