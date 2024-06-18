@@ -15,7 +15,7 @@ glgpm_sim(
   crs = NULL,
   convert_to_crs = NULL,
   scale_to_km = TRUE,
-  control_MCMC = NULL,
+  control_mcmc = NULL,
   sim_pars = list(beta = NULL, sigma2 = NULL, tau2 = NULL, phi = NULL, sigma2_me = NULL,
     sigma2_re = NULL),
   messages = TRUE

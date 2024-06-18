@@ -8,7 +8,7 @@ Description: Provides functions for likelihood-based inference of spatially refe
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
-RoxygenNote: 7.2.3
+RoxygenNote: 7.3.1
 URL: https://claudiofronterre.github.io/RiskMap/
 Imports: sf, stats, methods, ggplot2, Matrix, maxLik
 Depends:
