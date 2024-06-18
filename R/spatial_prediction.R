@@ -59,6 +59,14 @@ pred_over_grid <- function(object,
     intercept_only <- FALSE
   }
 
+  n_re <- length(object$re)
+  if(n_re > 0 & type=="marginal") {
+    warning("Predictions for the unstructured random effects will not be perfomed if type = 'marginal';
+            if you wish to also include the predictions for the unstructured random
+            effects then set type = 'joint'")
+    n_re <- 0
+  }
+
   if(!is.null(predictors)) {
 
     if(!is.data.frame(predictors)) stop("'predictors' must be an object of class 'data.frame'")
@@ -75,9 +83,11 @@ pred_over_grid <- function(object,
     mu_pred <- 0
   }
 
-  n_re <- length(object$re)
+  if(n_re>0) {
 
-  if(!is.null(object$re)) {
+    ID_g <- as.matrix(cbind(object$ID_coords, object$ID_re))
+    re_unique <- object$re
+    n_dim_re_tot <- sapply(1:(n_re+1), function(i) length(unique(ID_g[,i])))
     if(!is.null(re_predictors)) {
       if(!is.data.frame(re_predictors)) stop("'re_predictors' must be an object of class 'data.frame'")
       if(nrow(re_predictors)!=n_pred) stop("the values provided for 'predictors' do not match the prediction grid passed to 'grid_pred'")
@@ -88,9 +98,9 @@ pred_over_grid <- function(object,
       for(i in 1:n_re) {
         re_val_i <- re_predictors[,i]
         D_re_pred[[i]] <- matrix(0,nrow = n_pred, ncol = n_dim_re[i])
-        for(j in 1:n_pred) {
-          ind_i <- which(as.character(re_val_i[j])==object$re[[i]])
-          D_re_pred[[i]][j, ind_i] <- 1
+        for(j in 1:length(object$re[[i]])) {
+          ind_j <- which(re_val_i==object$re[[i]][j])
+          D_re_pred[[i]][ind_j, j] <- 1
         }
       }
     } else {
@@ -107,9 +117,15 @@ pred_over_grid <- function(object,
   out$par_hat <- object$par_hat
 
   if(object$scale_to_km) grp <- grp/1000
-  U_pred <- t(sapply(1:n_pred,
-                     function(i) sqrt((object$coords[object$ID_coords,1]-grp[i,1])^2+
+  if(object$family=="gaussian") {
+    U_pred <- t(sapply(1:n_pred,
+                       function(i) sqrt((object$coords[object$ID_coords,1]-grp[i,1])^2+
                                         (object$coords[object$ID_coords,2]-grp[i,2])^2)))
+  } else {
+    U_pred <- t(sapply(1:n_pred,
+                       function(i) sqrt((object$coords[,1]-grp[i,1])^2+
+                                          (object$coords[,2]-grp[i,2])^2)))
+  }
   U <- dist(object$coords)
   C <- par_hat$sigma2*matern_cor(U_pred, phi = par_hat$phi,
                                  kappa = object$kappa)
@@ -121,7 +137,18 @@ pred_over_grid <- function(object,
     n_samples <- (control_sim$n_sim-control_sim$burnin)/control_sim$thin
   }
 
+  R <- matern_cor(U,phi = par_hat$phi, kappa=object$kappa,return_sym_matrix = TRUE)
+  diff.y <- object$y-mu
+  if(!is.null(object$fix_tau2)) {
+    nu2 <- object$fix_tau2/par_hat$sigma2
+  } else {
+    nu2 <- par_hat$tau2/par_hat$sigma2
+  }
+  diag(R) <- diag(R)+nu2
+
   if(object$family!="gaussian") {
+    Sigma <- par_hat$sigma2*R
+    Sigma_inv <- solve(Sigma)
     A <- C%*%Sigma_inv
 
     simulation <-
@@ -142,7 +169,7 @@ pred_over_grid <- function(object,
       Sigma_pred <-  par_hat$sigma2*matern_cor(U_pred_o, phi = par_hat$phi,
                                                kappa = object$kappa,
                                                return_sym_matrix = TRUE)
-
+      diag(Sigma_pred) <- diag(Sigma_pred)+10e-10
       Sigma_cond <- Sigma_pred - A%*%t(C)
       Sigma_cond_sroot <- t(chol(Sigma_cond))
       out$S_samples <- sapply(1:n_samples,
@@ -151,14 +178,6 @@ pred_over_grid <- function(object,
                                 Sigma_cond_sroot%*%rnorm(n_pred))
     }
   } else {
-    R <- matern_cor(U,phi = par_hat$phi, kappa=object$kappa,return_sym_matrix = TRUE)
-    diff.y <- object$y-mu
-    if(!is.null(object$fix_tau2)) {
-      nu2 <- object$fix_tau2/par_hat$sigma2
-    } else {
-      nu2 <- par_hat$tau2/par_hat$sigma2
-    }
-    diag(R) <- diag(R)+nu2
 
     if(!is.null(object$fix_var_me) && object$fix_var_me>0 ||
        is.null(object$fix_var_me)) {
@@ -167,22 +186,21 @@ pred_over_grid <- function(object,
 
       ID_g <- as.matrix(cbind(object$ID_coords, object$ID_re))
 
-      n_dim_re <- sapply(1:(n_re+1), function(i) length(unique(ID_g[,i])))
-      C_g <- matrix(0, nrow = m, ncol = sum(n_dim_re))
+      n_dim_re_tot <- sapply(1:(n_re+1), function(i) length(unique(ID_g[,i])))
+      C_g <- matrix(0, nrow = m, ncol = sum(n_dim_re_tot))
 
       for(i in 1:m) {
         ind_s_i <- which(s_unique==ID_g[i,1])
-        C_g[i,1:n_dim_re[1]][ind_s_i] <- 1
+        C_g[i,1:n_dim_re_tot[1]][ind_s_i] <- 1
       }
 
-      re_unique <- object$re
       if(n_re>0) {
         for(j in 1:n_re) {
-          select_col <- sum(n_dim_re[1:j])
+          select_col <- sum(n_dim_re_tot[1:j])
 
           for(i in 1:m) {
             ind_re_j_i <- which(re_unique[[j]]==ID_g[i,j+1])
-            C_g[i,select_col+1:n_dim_re[j+1]][ind_re_j_i] <- 1
+            C_g[i,select_col+1:n_dim_re_tot[j+1]][ind_re_j_i] <- 1
           }
         }
       }
@@ -191,19 +209,19 @@ pred_over_grid <- function(object,
       C_g_m <- forceSymmetric(C_g_m)
 
 
-      Sigma_g <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
-      Sigma_g_inv <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
-      Sigma_g[1:n_dim_re[1], 1:n_dim_re[1]] <- par_hat$sigma2*R
-      Sigma_g_inv[1:n_dim_re[1], 1:n_dim_re[1]] <-
+      Sigma_g <- matrix(0, nrow = sum(n_dim_re_tot), ncol = sum(n_dim_re_tot))
+      Sigma_g_inv <- matrix(0, nrow = sum(n_dim_re_tot), ncol = sum(n_dim_re_tot))
+      Sigma_g[1:n_dim_re_tot[1], 1:n_dim_re_tot[1]] <- par_hat$sigma2*R
+      Sigma_g_inv[1:n_dim_re_tot[1], 1:n_dim_re_tot[1]] <-
         solve(R)/par_hat$sigma2
       if(n_re > 0) {
         for(j in 1:n_re) {
-          select_col <- sum(n_dim_re[1:j])
+          select_col <- sum(n_dim_re_tot[1:j])
 
-          diag(Sigma_g[select_col+1:n_dim_re[j+1], select_col+1:n_dim_re[j+1]]) <-
+          diag(Sigma_g[select_col+1:n_dim_re_tot[j+1], select_col+1:n_dim_re_tot[j+1]]) <-
             par_hat$sigma2_re[j]
 
-          diag(Sigma_g_inv[select_col+1:n_dim_re[j+1], select_col+1:n_dim_re[j+1]]) <-
+          diag(Sigma_g_inv[select_col+1:n_dim_re_tot[j+1], select_col+1:n_dim_re_tot[j+1]]) <-
             1/par_hat$sigma2_re[j]
 
         }
@@ -247,20 +265,57 @@ pred_over_grid <- function(object,
   if(n_re>0) {
     out$re <- list()
     out$re$D_pred <- D_re_pred
+    out$re$samples <- list()
     re_names <- colnames(object$ID_re)
+    if(object$family=="gaussian") {
+      Sigma_cond_inv <- solve(Sigma_cond)
+      C_Z <- C_g[,-(1:n_dim_re_tot[1])]
+      add <- 0
+      for(i in 1:length(n_dim_re_tot[-1])) {
+        C_Z[,add+1:n_dim_re_tot[i+1]] <- par_hat$sigma2_re[i]*C_Z[,add+1:n_dim_re_tot[i+1]]
+        add <- n_dim_re_tot[i+1]
+      }
+
+      A_Z <- Matrix::t(C_Z)%*%B%*%t(C)%*%Sigma_cond_inv
+
+      Sigma_Z_cond <- diag(rep(par_hat$sigma2_re,n_dim_re_tot[-1]))-
+        Matrix::t(C_Z)%*%B%*%C_Z-
+        A_Z%*%C%*%Matrix::t(B)%*%C_Z
+      Sigma_Z_cond_sroot <- t(chol(Sigma_Z_cond))
+
+      mu_Z_cond <- sapply(1:n_samples, function(i) as.matrix(A_Z%*%(out$S_samples[,i]-mu_cond_S)))
+      add <- 0
+      for(i in 1:n_re) {
+        for(j in 1:n_dim_re_tot[1+i]) {
+          add <- add + 1
+          C_re_ij <- matrix(0, ncol= m)
+          ind_ij <- which(object$ID_re[[i]]==re_unique[[i]][j])
+          C_re_ij[,ind_ij] <- par_hat$sigma2_re[i]
+          A_re <- C_re_ij%*%B
+
+          mu_Z_cond[add,] <- as.numeric(A_re%*%diff.y)+mu_Z_cond[add,]
+        }
+      }
+      re_samples <- sapply(1:n_samples,
+                           function(i)
+                             as.numeric(
+                               mu_Z_cond[,i]+
+                                 Sigma_Z_cond_sroot%*%rnorm(sum(n_dim_re_tot[-1]))))
+    } else {
+      re_samples <- matrix(0, nrow = sum(n_dim_re_tot[-1]), ncol = n_samples)
+      add <- 0
+      for(i in 1:n_re) {
+        re_samples[1:n_dim_re_tot[i+1],] <- t(simulation$samples[[i+1]])
+        add <- add+n_dim_re_tot[i+1]
+      }
+    }
+
+    add <- 0
     for(i in 1:n_re) {
-      C_re <- matrix(0, nrow=n_pred,ncol=n_dim_re[1+i])
-      for(j in 1:n_dim_re[1+i]) {
-        C_re <- matrix(0, ncol= m)
-        ind_ij <- which(object$ID_re[[i]]==re_unique[[i]][j])
-        C_re[,ind_ij] <- par_hat$sigma2_re[i]
-        A_re <- C_re%*%B
-
-        re_mu_cond <- as.numeric(A_re%*%diff.y)
-        re_sd_cond <- as.numeric(sqrt(par_hat$sigma2_re[i]-A_re%*%t(C_re)))
-
-        out$re[[paste(re_names[i])]][[paste(object$re[[i]][j])]] <-
-          list(mu_cond = re_mu_cond, sd_cond = re_sd_cond)
+      for(j in 1:n_dim_re_tot[1+i]) {
+        add <- add + 1
+        out$re$samples[[paste(re_names[[i]])]][[paste(re_unique[[i]][[j]])]] <-
+          re_samples[add,]
       }
     }
   }
@@ -309,7 +364,8 @@ pred_target_grid <- function(object,
   n_samples <- ncol(object$S_samples)
   n_pred <- nrow(object$S_samples)
 
-  n_re <- length(object$re)-1
+  n_re <- length(object$re$samples)
+  re_names <- names(object$re$samples)
 
   out <- list()
   if(length(object$mu_pred)==1 && object$mu_pred==0 &&
@@ -360,15 +416,13 @@ pred_target_grid <- function(object,
                              object$S_samples[,i])
 
   if(include_re) {
+    n_dim_re <- sapply(1:n_re, function(i) length(object$re$samples[[i]]))
+
     for(i in 1:n_re) {
-      dim_re_i <- ncol(object$re$D_pred[[i]])
-      re_i_samples <- matrix(0, nrow=n_pred, ncol=n_samples)
-      for(j in 1:dim_re_i) {
-        if(object$family=="gaussian") {
-          samples_ij <- rnorm(n_samples,
-                              mean = object$re[[i+1]][[j]]$mu_cond,
-                              sd = object$re[[i+1]][[j]]$sd_cond)
-          #object$re$D_pred[[i]][,j]
+      for(j in 1:n_dim_re[i]) {
+        for(h in 1:n_samples) {
+          out$lp_samples[,h] <- out$lp_samples[,h] +
+          object$re$D_pred[[i]][,j]*object$re$samples[[i]][[j]][h]
         }
       }
     }
@@ -418,6 +472,7 @@ pred_target_shp <- function(object, shp, shp_target,
                             include_covariates = TRUE,
                             include_nugget = FALSE,
                             include_cov_offset = FALSE,
+                            include_re = FALSE,
                             f_target = NULL,
                             pd_summary = NULL) {
   if(!inherits(object,
