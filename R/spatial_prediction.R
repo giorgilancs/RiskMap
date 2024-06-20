@@ -54,23 +54,60 @@ pred_over_grid <- function(object,
   inter_lt_f$pf <- update(inter_lt_f$pf, NULL ~.)
 
   if(p==1) {
-    intercept_only <- prod(object$D[,1]==1)
+    intercept_only <- prod(object$D[,1]==1)==1
   } else {
     intercept_only <- FALSE
   }
 
   n_re <- length(object$re)
-  if(n_re > 0 & type=="marginal") {
-    warning("Predictions for the unstructured random effects will not be perfomed if type = 'marginal';
+  if(n_re > 0 & type=="marginal" & !is.null(re_predictors)) {
+    stop("Predictions for the unstructured random effects will not be perfomed if type = 'marginal';
             if you wish to also include the predictions for the unstructured random
             effects then set type = 'joint'")
-    n_re <- 0
   }
 
   if(!is.null(predictors)) {
 
     if(!is.data.frame(predictors)) stop("'predictors' must be an object of class 'data.frame'")
     if(nrow(predictors)!=n_pred) stop("the values provided for 'predictors' do not match the prediction grid passed to 'grid_pred'")
+
+    if(any(is.na(predictors))) {
+      warning("There are missing values in 'predictors'; these values have been removed
+              alongside the corresponding prediction locations")
+      if(any(is.na(re_predictors))) {
+        warning("There are missing values in 're_predictors'; these values have been removed
+              alongside the corresponding prediction locations")
+      }
+      if(!is.null(re_predictors)) {
+        if(nrow(re_predictors)!=n_pred) stop("the values provided for 're_predictors' do not match the prediction grid passed to 'grid_pred'")
+
+        comb_pred <- data.frame(predictors,
+                                re_predictors)
+        ind_c <- complete.cases(comb_pred)
+        predictors_aux <- data.frame(na.omit(comb_pred)[,1:ncol(predictors)])
+        colnames(predictors_aux) <- colnames(predictors)
+        predictors <- predictors_aux
+
+        re_predictors_aux <- data.frame(na.omit(comb_pred)[,(ncol(predictors)+1):
+                                                            (ncol(predictors)+
+                                                             ncol(re_predictors))])
+        colnames(re_predictors_aux) <- colnames(re_predictors_aux)
+        re_predictors <- re_predictors_aux
+      } else {
+        comb_pred <- predictors
+        ind_c <- complete.cases(comb_pred)
+        predictors_aux <- data.frame(na.omit(comb_pred))
+        colnames(predictors_aux) <- colnames(predictors)
+        predictors <- predictors_aux
+      }
+      grid_pred_aux <- st_coordinates(grid_pred)[ind_c,]
+      grid_pred <- st_as_sf(data.frame(grid_pred_aux),
+                            coords = c("X","Y"),
+                            crs = st_crs(grid_pred)$input)
+      grp <- st_coordinates(grid_pred)
+      n_pred <- nrow(grp)
+
+    }
 
     mf_pred <- model.frame(inter_lt_f$pf,data=predictors, na.action = na.fail)
     D_pred <- as.matrix(model.matrix(attr(mf_pred,"terms"),data=predictors))
@@ -89,8 +126,24 @@ pred_over_grid <- function(object,
     re_unique <- object$re
     n_dim_re_tot <- sapply(1:(n_re+1), function(i) length(unique(ID_g[,i])))
     if(!is.null(re_predictors)) {
+      if(any(is.na(re_predictors))) {
+        warning("There are missing values in 're_predictors'; these values have been removed
+              alongside the corresponding prediction locations")
+        comb_pred <- data.frame(re_predictors)
+        ind_c <- complete.cases(comb_pred)
+        re_predictors_aux <- data.frame(na.omit(comb_pred))
+        colnames(re_predictors_aux) <- colnames(re_predictors_aux)
+        re_predictors <- re_predictors_aux
+        grid_pred_aux <- st_coordinates(grid_pred)[ind_c,]
+        grid_pred <- st_as_sf(data.frame(grid_pred_aux),
+                              coords = c("X","Y"),
+                              crs = st_crs(grid_pred)$input)
+        grp <- st_coordinates(grid_pred)
+        n_pred <- nrow(grp)
+      }
       if(!is.data.frame(re_predictors)) stop("'re_predictors' must be an object of class 'data.frame'")
-      if(nrow(re_predictors)!=n_pred) stop("the values provided for 'predictors' do not match the prediction grid passed to 'grid_pred'")
+
+      if(nrow(re_predictors)!=n_pred) stop("the values provided for 're_predictors' do not match the prediction grid passed to 'grid_pred'")
       if(ncol(re_predictors)!=n_re) stop("the number of unstructured random effects provided in 're_predictors' does not match that of the fitted model")
 
       D_re_pred <- list()
@@ -144,6 +197,8 @@ pred_over_grid <- function(object,
   } else {
     nu2 <- par_hat$tau2/par_hat$sigma2
   }
+  if(nu2==0) nu2 <- 10e-10
+
   diag(R) <- diag(R)+nu2
 
   if(object$family!="gaussian") {
@@ -169,7 +224,6 @@ pred_over_grid <- function(object,
       Sigma_pred <-  par_hat$sigma2*matern_cor(U_pred_o, phi = par_hat$phi,
                                                kappa = object$kappa,
                                                return_sym_matrix = TRUE)
-      diag(Sigma_pred) <- diag(Sigma_pred)+10e-10
       Sigma_cond <- Sigma_pred - A%*%t(C)
       Sigma_cond_sroot <- t(chol(Sigma_cond))
       out$S_samples <- sapply(1:n_samples,
@@ -262,7 +316,7 @@ pred_over_grid <- function(object,
     }
   }
 
-  if(n_re>0) {
+  if(n_re>0 & !is.null(re_predictors)) {
     out$re <- list()
     out$re$D_pred <- D_re_pred
     out$re$samples <- list()
@@ -318,8 +372,10 @@ pred_over_grid <- function(object,
           re_samples[add,]
       }
     }
-  }
 
+  } else {
+    out$re <- list(D_pred = NULL, samples = NULL)
+  }
   out$inter_f <- inter_f
   out$family <- object$family
   out$par_hat <- par_hat
@@ -429,7 +485,11 @@ pred_target_grid <- function(object,
   }
 
   names_f <- names(f_target)
+  if(is.null(names_f)) names_f <- paste("f_target_",1:length(f_target), sep = "")
+
   names_s <- names(pd_summary)
+  if(is.null(pd_summary)) names_s <- paste("pd_summary_",1:length(f_target), sep = "")
+
   out$target <- list()
 
   for(i in 1:n_f) {
@@ -466,7 +526,7 @@ plot.RiskMap.pred.target.grid <- function(object,
 
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @export
-pred_target_shp <- function(object, shp, shp_target,
+pred_target_shp <- function(object, shp, shp_target=mean,
                             weights = NULL,standardize_weights = FALSE,
                             col_names=NULL,
                             include_covariates = TRUE,
@@ -491,12 +551,16 @@ pred_target_shp <- function(object, shp, shp_target,
          the function 'pred_S'")
   }
 
-  if(!inherits(shp_target,
-               what = c("function"), which = FALSE)) {
-    stop("The object passed to 'shp_function' must be a function
-         that takes as an input a vector and returns a single numeric value")
-  }
   n_pred <- nrow(object$S_samples)
+
+  n_re <- length(object$re$samples)
+  re_names <- names(object$re$samples)
+
+  if(n_re==0 &&
+     include_re) {
+    stop("The categories of the randome effects variables have not been provided;
+         re-run pred_over_grid and provide the covariates through the argument 're_predictors'")
+  }
 
   if(!is.null(weights)) {
     if(!inherits(weights,
@@ -569,6 +633,19 @@ pred_target_shp <- function(object, shp, shp_target,
                            function(i)
                              mu_target + cov_offset +
                              object$S_samples[,i])
+  if(include_re) {
+    n_dim_re <- sapply(1:n_re, function(i) length(object$re$samples[[i]]))
+
+    for(i in 1:n_re) {
+      for(j in 1:n_dim_re[i]) {
+        for(h in 1:n_samples) {
+          out$lp_samples[,h] <- out$lp_samples[,h] +
+            object$re$D_pred[[i]][,j]*object$re$samples[[i]][[j]][h]
+        }
+      }
+    }
+  }
+
   names_f <- names(f_target)
   names_s <- names(pd_summary)
   out$target <- list()

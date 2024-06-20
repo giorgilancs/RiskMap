@@ -1919,7 +1919,46 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
   return(out_sim)
 }
 
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' Set Control Parameters for Simulation
+##'
+##' This function sets control parameters for running simulations, particularly for MCMC methods.
+##' It allows users to specify the number of simulations, burn-in period, thinning interval, and various
+##' other parameters necessary for the simulation.
+##'
+##' @param n_sim Integer. The total number of simulations to run. Default is 12000.
+##' @param burnin Integer. The number of initial simulations to discard (burn-in period, used for the MCMC algorithm). Default is 2000.
+##' @param thin Integer. The interval at which simulations are recorded (thinning interval, used for the MCMC algorithm). Default is 10.
+##' @param h Numeric. An optional parameter. Must be non-negative if specified.
+##' @param c1.h Numeric. A control parameter for the simulation. Must be positive. Default is 0.01.
+##' @param c2.h Numeric. Another control parameter for the simulation. Must be between 0 and 1. Default is 1e-04.
+##' @param linear_model Logical. If TRUE, the function sets up parameters for a linear model and
+##' only returns \code{n_sim}. Default is FALSE.
+##'
+##' @details
+##' The function validates the input parameters and ensures they are appropriate for the simulation that is used
+##' in the \code{\link{fit_glgpm}} fitting function.
+##' For non-linear models, it checks that \code{n_sim} is greater than \code{burnin}, that \code{thin} is positive
+##' and a divisor of \code{(n_sim - burnin)}, and that \code{h}, \code{c1.h}, and \code{c2.h} are within their
+##' respective valid ranges.
+##'
+##' If \code{linear_model} is TRUE, only \code{n_sim} and \code{linear_model} are required, and the function
+##' returns a list containing these parameters.
+##'
+##' If \code{linear_model} is FALSE, the function returns a list containing \code{n_sim}, \code{burnin}, \code{thin},
+##' \code{h}, \code{c1.h}, \code{c2.h}, and \code{linear_model}.
+##'
+##' @return A list of control parameters for the simulation with class attribute "mcmc.RiskMap".
+##'
+##' @examples
+##' # Example with default parameters
+##' control_params <- set_control_sim()
+##'
+##' # Example with custom parameters
+##' control_params <- set_control_sim(n_sim = 15000, burnin = 3000, thin = 20)
+##'
+##' @seealso \code{\link[Matrix]{Matrix}}, \code{\link[Matrix]{forceSymmetric}}
+##' @author
+##' Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @importFrom Matrix Matrix forceSymmetric
 ##' @export
 set_control_sim <- function (n_sim  = 12000, burnin = 2000, thin = 10, h = NULL, c1.h = 0.01, c2.h = 1e-04,
