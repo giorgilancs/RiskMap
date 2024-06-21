@@ -82,9 +82,12 @@ glgpm <- function(formula,
   nong <- family=="binomial" | family=="poisson"
 
 
-  if(class(formula)!="formula") stop("'formula' must be a 'formula'
-                                     object indicating the variables of the
-                                     model to be fitted")
+  if(!inherits(formula,
+               what = "formula", which = FALSE)) {
+    stop("'formula' must be a 'formula'
+         object indicating the variables of the
+         model to be fitted")
+  }
 
   inter_f <- interpret.formula(formula)
 
@@ -117,7 +120,7 @@ glgpm <- function(formula,
     if(is.na(st_crs(data)) & is.null(crs)) {
       stop("the CRS of the sf object passed to 'data' is missing and and is not specified through 'crs'")
     } else if(is.na(st_crs(data))) {
-      st_crs(data) <- crs
+      data <- st_as_sf(data, crs = crs)
     }
   }
 
@@ -160,9 +163,14 @@ glgpm <- function(formula,
     if(!is.numeric(units_m)) stop("the variable passed to `distr_offset` must be numeric")
     if(family=="binomial" & any(y > units_m)) stop("The counts identified by the outcome variable cannot be larger
                               than `distr_offset` in the case of a Binomial distribution")
-    if(class(control_mcmc)!="mcmc.RiskMap") step ("the argument passed to 'control_mcmc' must be an output
+    if(!inherits(control_mcmc,
+                 what = "mcmc.RiskMap", which = FALSE)) {
+      stop ("the argument passed to 'control_mcmc' must be an output
                                                   from the function set_control_sim; see ?set_control_sim
                                                   for more details")
+
+    }
+
   }
 
   if(length(inter_f$re.spec) > 0) {
@@ -289,7 +297,7 @@ glgpm <- function(formula,
     if(is.null(start_pars$sigma2_re)) {
       start_pars$sigma2_re <- rep(1,n_re)
     } else {
-      if(length(sigma2_re)!=n_re) stop("starting values for 'sigma2_re' do not
+      if(length(start_pars$sigma2_re)!=n_re) stop("starting values for 'sigma2_re' do not
                                        match the number of specified unstructured
                                        random effects")
       if(any(start_pars$sigma2_re<0)) stop("all the starting values for sigma2_re must be positive")
@@ -1296,7 +1304,8 @@ glgpm_sim <- function(n_sim,
                       messages = TRUE) {
 
   if(!is.null(model_fit)) {
-    if(class(model_fit)!="RiskMap") stop("'model_fit' must be of class 'RiskMap'")
+    if(!inherits(model_fit,
+                    what = "RiskMap", which = FALSE)) stop("'model_fit' must be of class 'RiskMap'")
     formula <- as.formula(model_fit$formula)
     data <- model_fit$data_sf
     family = model_fit$family
@@ -1311,9 +1320,13 @@ glgpm_sim <- function(n_sim,
                                    'control_mcmc' must be provided")
   }
 
-  if(class(formula)!="formula") stop("'formula' must be a 'formula'
+  if(!inherits(formula,
+               what = "formula", which = FALSE)) {
+    stop("'formula' must be a 'formula'
                                      object indicating the variables of the
                                      model to be fitted")
+  }
+
 
   if(length(crs)>0) {
     if(!is.numeric(crs) |
@@ -1344,7 +1357,7 @@ glgpm_sim <- function(n_sim,
     if(is.na(st_crs(data)) & is.null(crs)) {
       stop("the CRS of the sf object passed to 'data' is missing and and is not specified through 'crs'")
     } else if(is.na(st_crs(data))) {
-      st_crs(data) <- crs
+      data <- st_as_sf(data, crs = crs)
     }
   }
 
@@ -1455,7 +1468,7 @@ glgpm_sim <- function(n_sim,
     if(is.null(sim_pars$sigma2_me)) stop("'sigma2_me' is missing")
     sigma2_me <- sim_pars$sigma2_me
     if(n_re>0) {
-      if(is.null(sim_pars$sigma2_re)) steop("'sigma2_re' is missing")
+      if(is.null(sim_pars$sigma2_re)) stop("'sigma2_re' is missing")
       if(length(sim_pars$sigma2_re)!=n_re) stop("the values passed to 'sigma2_re' in 'sim_pars'
       does not match the number of random effects specfied in re() in the formula")
       sigma2_re <- sim_pars$sigma2_re
@@ -2135,11 +2148,8 @@ function(y, D, coords, units_m, kappa,
            par0, cov_offset,
            ID_coords, ID_re, s_unique, re_unique,
            fix_tau2, family,
-           start_beta = start_pars$beta,
-           start_cov_pars = c(start_pars$sigma2,
-                              start_pars$phi,
-                              start_pars$tau2,
-                              start_pars$sigma2_re),
+           start_beta,
+           start_cov_pars,
            control_mcmc,
            messages = TRUE) {
 

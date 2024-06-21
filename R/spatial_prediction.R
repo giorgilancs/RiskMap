@@ -46,9 +46,13 @@ pred_over_grid <- function(object,
          of class 'sfc'")
   }
 
-  if(class(control_mcmc)!="mcmc.RiskMap") step ("the argument passed to 'control_mcmc' must be an output
+  if(!inherits(control_sim,
+                 what = "mcmc.RiskMap", which = FALSE)) {
+      stop ("the argument passed to 'control_sim' must be an output
                                                   from the function set_control_sim; see ?set_control_sim
                                                   for more details")
+
+  }
 
   grid_pred <- st_transform(grid_pred,crs = object$crs)
 
@@ -842,8 +846,8 @@ plot.RiskMap_pred_target_shp <- function(x, which_target = "linear_target",
                                          which_summary = "mean", ...) {
   col_shp_name <- paste(which_target,"_",which_summary,sep="")
 
-  out <- ggplot(object$shp) +
-    geom_sf(aes(fill = .data[[col_shp_name]])) +
+  out <- ggplot(x$shp) +
+    geom_sf(aes(fill = x$shp[[col_shp_name]])) +
     scale_fill_distiller(...)
   return(out)
 }

@@ -1,6 +1,6 @@
 Package: RiskMap
 Type: Package
-Title: Geostatistical Modeling of Spatially Referenced Data
+Title: Geo-Statistical Modeling of Spatially Referenced Data
 Version: 0.1.0
 Author: Emanuele Giorgi, Claudio Fronterre
 Maintainer: Emanuele Giorgi <e.giorgi@lancaster.ac.uk>

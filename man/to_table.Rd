@@ -9,7 +9,7 @@ to_table(object, ...)
 \arguments{
 \item{object}{An object of class "RiskMap" obtained as a result of a call to \code{\link{glgpm}}.}
 
-\item{...}{Additional arguments to be passed to \code{\link{xtable}}.}
+\item{...}{Additional arguments to be passed to \code{\link[xtable]{xtable}}.}
 }
 \value{
 An object of class "xtable" which inherits the \code{data.frame} class and contains several additional attributes specifying the table formatting options.
@@ -35,7 +35,7 @@ print(latex_table, type = "latex")
 }
 }
 \seealso{
-\code{\link{glgpm}}, \code{\link{xtable}}
+\code{\link{glgpm}}, \code{\link[xtable]{xtable}}
 }
 \author{
 Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}

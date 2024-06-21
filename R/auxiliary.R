@@ -630,7 +630,7 @@ print.summary.RiskMap <- function(x, ...) {
 ##' @title Create LaTeX Table from Model Fit
 ##' @description Converts a "RiskMap" model fit into an \code{xtable} object, which can then be printed as a LaTeX or HTML table.
 ##' @param object An object of class "RiskMap" obtained as a result of a call to \code{\link{glgpm}}.
-##' @param ... Additional arguments to be passed to \code{\link{xtable}}.
+##' @param ... Additional arguments to be passed to \code{\link[xtable]{xtable}}.
 ##' @details This function takes a fitted "RiskMap" model and converts it into an \code{xtable} object. The resulting table includes:
 ##' \itemize{
 ##'   \item Regression coefficients with their estimates, confidence intervals, and p-values.
@@ -642,7 +642,7 @@ print.summary.RiskMap <- function(x, ...) {
 ##' @return An object of class "xtable" which inherits the \code{data.frame} class and contains several additional attributes specifying the table formatting options.
 ##' @importFrom xtable xtable
 ##' @export
-##' @seealso \code{\link{glgpm}}, \code{\link{xtable}}
+##' @seealso \code{\link{glgpm}}, \code{\link[xtable]{xtable}}
 ##' @examples
 ##' \dontrun{
 ##' # Assuming `riskmap_fit` is an object of class "RiskMap"

@@ -158,7 +158,7 @@ s_variogram <- function(data, variable, bins = NULL,
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @importFrom methods is
-##' @importFrom ggplot2 ggplot aes geom_point geom_ribbon geom_line labs
+##' @importFrom ggplot2 ggplot aes aes_string geom_point geom_ribbon geom_line labs
 ##' @export
 ##'
 
@@ -168,7 +168,7 @@ plot_s_variogram <- function(variog_output,
   if(!is(variog_output, "RiskMap_variogram")) stop("variogram must be an object of class 'RiskMap_variogram'")
 
   basic_plot <- ggplot(data = variog_output$variogram,
-         aes(x = mid_points, y = obs_vari)) +
+         aes_string(x = "mid_points", y = "obs_vari")) +
     geom_point()+geom_line()
 
   if(plot_envelope) {
