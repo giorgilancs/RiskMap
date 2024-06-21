@@ -2,26 +2,23 @@
 % Please edit documentation in R/auxiliary.R
 \name{propose_utm}
 \alias{propose_utm}
-\title{EPSG of the UTM zone}
+\title{EPSG of the UTM Zone}
 \usage{
 propose_utm(data)
 }
 \arguments{
-\item{data}{an object of class \code{sf} containing the variable for which the variogram
-is to be computed and the coordinates}
+\item{data}{An object of class \code{sf} containing the coordinates.}
 }
 \value{
-an integer indicating the EPSG of the UTM zone.
+An integer indicating the EPSG code of the UTM zone.
 }
 \description{
-Suggests EPSG of the UTM in which the majority of data falls in.
+Suggests the EPSG code for the UTM zone where the majority of the data falls.
 }
 \details{
-The function checks in which UTM zone and empishere the majority of the
-data fall in and proposes an EPSG.
+The function determines the UTM zone and hemisphere where the majority of the data points are located and proposes the corresponding EPSG code.
 }
 \author{
 Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}
-
 Claudio Fronterre \email{c.fronterr@lancaster.ac.uk}
 }

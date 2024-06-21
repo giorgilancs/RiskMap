@@ -21,9 +21,48 @@ glgpm_sim(
   messages = TRUE
 )
 }
+\arguments{
+\item{n_sim}{Number of simulations to perform.}
+
+\item{model_fit}{Fitted GLGPM model object of class 'RiskMap'. If provided, overrides 'formula', 'data', 'family', 'crs', 'convert_to_crs', 'scale_to_km', and 'control_mcmc' arguments.}
+
+\item{formula}{Model formula indicating the variables of the model to be simulated.}
+
+\item{data}{Data frame or 'sf' object containing the variables in the model formula.}
+
+\item{family}{Distribution family for the response variable. Must be one of 'gaussian', 'binomial', or 'poisson'.}
+
+\item{distr_offset}{Offset for the distributional part of the GLGPM. Required for 'binomial' and 'poisson' families.}
+
+\item{cov_offset}{Offset for the covariate part of the GLGPM.}
+
+\item{crs}{Coordinate reference system (CRS) code for spatial data.}
+
+\item{convert_to_crs}{CRS code to convert spatial data if different from 'crs'.}
+
+\item{scale_to_km}{Logical; if TRUE, distances between locations are computed in kilometers; if FALSE, in meters.}
+
+\item{control_mcmc}{Control parameters for MCMC simulation if applicable.}
+
+\item{sim_pars}{List of simulation parameters including 'beta', 'sigma2', 'tau2', 'phi', 'sigma2_me', and 'sigma2_re'.}
+
+\item{messages}{Logical; if TRUE, display progress and informative messages.}
+}
+\value{
+A list containing simulated data, simulated spatial random effects (if applicable), and other simulation parameters.
+}
 \description{
-Simulation from Generalized Linear Gaussian Process Models
+Simulates data from a fitted Generalized Linear Gaussian Process Model (GLGPM) or a specified model formula and data.
+}
+\details{
+Generalized Linear Gaussian Process Models (GLGPMs) extend generalized linear models (GLMs) by incorporating spatial Gaussian processes to model spatial correlation. This function simulates data from GLGPMs using Markov Chain Monte Carlo (MCMC) methods. It supports Gaussian, binomial, and Poisson response families, utilizing a Matern correlation function to model spatial dependence.
+
+The simulation process involves generating spatially correlated random effects and simulating responses based on the fitted or specified model parameters. For 'gaussian' family, the function simulates response values by adding measurement error.
+
+Additionally, GLGPMs can incorporate unstructured random effects specified through the \code{re()} term in the model formula, allowing for capturing additional variability beyond fixed and spatial covariate effects.
 }
 \author{
 Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}
+
+Claudio Fronterre \email{c.fronterr@lancaster.ac.uk}
 }

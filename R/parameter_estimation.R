@@ -1,5 +1,62 @@
 ##' @title Estimation of Generalized Linear Gaussian Process Models
+##' @description Fits generalized linear Gaussian process models to spatial data, incorporating spatial Gaussian processes with a Matern correlation function. Supports Gaussian, binomial, and Poisson response families.
+##' @param formula A formula object specifying the model to be fitted. The formula should include fixed effects, random effects (specified using \code{re()}), and spatial effects (specified using \code{gp()}).
+##' @param data A data frame or sf object containing the variables in the model.
+##' @param family A character string specifying the distribution of the response variable. Must be one of "gaussian", "binomial", or "poisson".
+##' @param distr_offset Optional offset for binomial or Poisson distributions. If not provided, defaults to 1 for binomial.
+##' @param cov_offset Optional numeric vector for covariate offset.
+##' @param crs Optional integer specifying the Coordinate Reference System (CRS) if data is not an sf object. Defaults to 4326 (long/lat).
+##' @param convert_to_crs Optional integer specifying a CRS to convert the spatial coordinates.
+##' @param scale_to_km Logical indicating whether to scale coordinates to kilometers. Defaults to TRUE.
+##' @param control_mcmc Control parameters for MCMC sampling. Must be an object of class "mcmc.RiskMap" as returned by \code{\link{set_control_sim}}.
+##' @param par0 Optional list of initial parameter values for the MCMC algorithm.
+##' @param S_samples Optional matrix of pre-specified sample paths for the spatial random effect.
+##' @param save_samples Logical indicating whether to save MCMC samples. Defaults to FALSE.
+##' @param messages Logical indicating whether to print progress messages. Defaults to TRUE.
+##' @param fix_var_me Optional fixed value for the measurement error variance.
+##' @param start_pars Optional list of starting values for model parameters: beta (regression coefficients), sigma2 (spatial process variance), tau2 (nugget effect variance), phi (spatial correlation scale), sigma2_me (measurement error variance), and sigma2_re (random effects variances).
+##' @details
+##' Generalized linear Gaussian process models extend generalized linear models (GLMs) by incorporating spatial Gaussian processes to account for spatial correlation in the data. This function fits GLGPMs using maximum likelihood methods, allowing for Gaussian, binomial, and Poisson response families.
+##' In the case of the Binomial and Poisson families, a Monte Carlo maximum likelihood algorithm is used.
+##'
+##' The spatial Gaussian process is modeled with a Matern correlation function, which is flexible and commonly used in geostatistical modeling. The function supports both spatial covariates and unstructured random effects, providing a comprehensive framework to analyze spatially correlated data across different response distributions.
+##'
+##' Additionally, the function allows for the inclusion of unstructured random effects, specified through the \code{re()} term in the model formula. These random effects can capture unexplained variability at specific locations beyond the fixed and spatial covariate effects, enhancing the model's flexibility in capturing complex spatial patterns.
+##'
+##' The \code{convert_to_crs} argument can be used to reproject the spatial coordinates to a different CRS. The \code{scale_to_km} argument scales the coordinates to kilometers if set to TRUE.
+##'
+##' The \code{control_mcmc} argument specifies the control parameters for MCMC sampling. This argument must be an object returned by \code{\link{set_control_sim}}.
+##'
+##' The \code{start_pars} argument allows for specifying starting values for the model parameters. If not provided, default starting values are used.
+##'
+##' @return An object of class "RiskMap" containing the fitted model and relevant information:
+##' \item{y}{Response variable.}
+##' \item{D}{Covariate matrix.}
+##' \item{coords}{Unique spatial coordinates.}
+##' \item{ID_coords}{Index of coordinates.}
+##' \item{re}{Random effects.}
+##' \item{ID_re}{Index of random effects.}
+##' \item{fix_tau2}{Fixed nugget effect variance.}
+##' \item{fix_var_me}{Fixed measurement error variance.}
+##' \item{formula}{Model formula.}
+##' \item{family}{Response family.}
+##' \item{crs}{Coordinate Reference System.}
+##' \item{scale_to_km}{Indicator if coordinates are scaled to kilometers.}
+##' \item{data_sf}{Original data as an sf object.}
+##' \item{kappa}{Spatial correlation parameter.}
+##' \item{units_m}{Distribution offset for binomial/Poisson.}
+##' \item{cov_offset}{Covariate offset.}
+##' \item{call}{Matched call.}
+##' @seealso \code{\link{set_control_sim}}, \code{\link{summary.RiskMap}}, \code{\link{to_table}}
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @examples
+##' \dontrun{
+##' # Example usage with Gaussian family
+##' data <- your_spatial_data
+##' fit <- glgpm(y ~ x1 + x2 + re(group) + gp(coords), data = data, family = "gaussian")
+##' summary(fit)
+##' }
 ##' @importFrom sf st_crs st_as_sf st_drop_geometry
 ##' @export
 glgpm <- function(formula,
@@ -1191,9 +1248,34 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
 }
 
 
-##' @title Simulation from Generalized Linear Gaussian Process Models
+##' Simulation from Generalized Linear Gaussian Process Models
+##'
+##' Simulates data from a fitted Generalized Linear Gaussian Process Model (GLGPM) or a specified model formula and data.
+##'
+##' @param n_sim Number of simulations to perform.
+##' @param model_fit Fitted GLGPM model object of class 'RiskMap'. If provided, overrides 'formula', 'data', 'family', 'crs', 'convert_to_crs', 'scale_to_km', and 'control_mcmc' arguments.
+##' @param formula Model formula indicating the variables of the model to be simulated.
+##' @param data Data frame or 'sf' object containing the variables in the model formula.
+##' @param family Distribution family for the response variable. Must be one of 'gaussian', 'binomial', or 'poisson'.
+##' @param distr_offset Offset for the distributional part of the GLGPM. Required for 'binomial' and 'poisson' families.
+##' @param cov_offset Offset for the covariate part of the GLGPM.
+##' @param crs Coordinate reference system (CRS) code for spatial data.
+##' @param convert_to_crs CRS code to convert spatial data if different from 'crs'.
+##' @param scale_to_km Logical; if TRUE, distances between locations are computed in kilometers; if FALSE, in meters.
+##' @param control_mcmc Control parameters for MCMC simulation if applicable.
+##' @param sim_pars List of simulation parameters including 'beta', 'sigma2', 'tau2', 'phi', 'sigma2_me', and 'sigma2_re'.
+##' @param messages Logical; if TRUE, display progress and informative messages.
+##'
+##' @details
+##' Generalized Linear Gaussian Process Models (GLGPMs) extend generalized linear models (GLMs) by incorporating spatial Gaussian processes to model spatial correlation. This function simulates data from GLGPMs using Markov Chain Monte Carlo (MCMC) methods. It supports Gaussian, binomial, and Poisson response families, utilizing a Matern correlation function to model spatial dependence.
+##'
+##' The simulation process involves generating spatially correlated random effects and simulating responses based on the fitted or specified model parameters. For 'gaussian' family, the function simulates response values by adding measurement error.
+##'
+##' Additionally, GLGPMs can incorporate unstructured random effects specified through the \code{re()} term in the model formula, allowing for capturing additional variability beyond fixed and spatial covariate effects.
+##'
+##' @return A list containing simulated data, simulated spatial random effects (if applicable), and other simulation parameters.
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @importFrom sf st_crs st_as_sf st_drop_geometry
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @export
 glgpm_sim <- function(n_sim,
                       model_fit = NULL,
@@ -1484,9 +1566,30 @@ glgpm_sim <- function(n_sim,
   return(out)
 }
 
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @author Peter J. Diggle \email{p.diggle@@lancaster.ac.uk}
+##' Maximization of the Integrand for Generalized Linear Gaussian Process Models
+##'
+##' Maximizes the integrand function for Generalized Linear Gaussian Process Models (GLGPMs), which involves the evaluation of likelihood functions with spatially correlated random effects.
+##'
+##' @param y Response variable vector.
+##' @param units_m Units of measurement for the response variable.
+##' @param mu Mean vector of the response variable.
+##' @param Sigma Covariance matrix of the spatial process.
+##' @param ID_coords Indices mapping response to locations.
+##' @param ID_re Indices mapping response to unstructured random effects.
+##' @param family Distribution family for the response variable. Must be one of 'gaussian', 'binomial', or 'poisson'.
+##' @param sigma2_re Variance of the unstructured random effects.
+##' @param hessian Logical; if TRUE, compute the Hessian matrix.
+##' @param gradient Logical; if TRUE, compute the gradient vector.
+##'
+##' @details
+##' This function maximizes the integrand for GLGPMs using the Nelder-Mead optimization algorithm. It computes the likelihood function incorporating spatial covariance and unstructured random effects, if provided.
+##'
+##' The integrand includes terms for the spatial process (Sigma), unstructured random effects (sigma2_re), and the likelihood function (llik) based on the specified distribution family ('gaussian', 'binomial', or 'poisson').
+##'
+##' @return A list containing the mode estimate, and optionally, the Hessian matrix and gradient vector.
 ##' @export
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,family,
                             sigma2_re = NULL,
                             hessian=FALSE, gradient=FALSE) {
@@ -1700,7 +1803,45 @@ maxim.integrand <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,family,
   return(out)
 }
 
+##' Laplace Sampling Markov Chain Monte Carlo (MCMC) for Generalized Linear Gaussian Process Models
+##'
+##' Performs MCMC sampling using Laplace approximation for Generalized Linear Gaussian Process Models (GLGPMs).
+##'
+##' @param y Response variable vector.
+##' @param units_m Units of measurement for the response variable.
+##' @param mu Mean vector of the response variable.
+##' @param Sigma Covariance matrix of the spatial process.
+##' @param ID_coords Indices mapping response to locations.
+##' @param ID_re Indices mapping response to unstructured random effects.
+##' @param sigma2_re Variance of the unstructured random effects.
+##' @param family Distribution family for the response variable. Must be one of 'gaussian', 'binomial', or 'poisson'.
+##' @param control_mcmc List with control parameters for the MCMC algorithm:
+##'   \describe{
+##'     \item{n_sim}{Number of MCMC iterations.}
+##'     \item{burnin}{Number of burn-in iterations.}
+##'     \item{thin}{Thinning parameter for saving samples.}
+##'     \item{h}{Step size for proposal distribution. Defaults to 1.65/(n_tot^(1/6)).}
+##'     \item{c1.h, c2.h}{Parameters for adaptive step size tuning.}
+##'   }
+##' @param Sigma_pd Precision matrix (optional) for Laplace approximation.
+##' @param mean_pd Mean vector (optional) for Laplace approximation.
+##' @param messages Logical; if TRUE, print progress messages.
+##'
+##' @details
+##' This function implements a Laplace sampling MCMC approach for GLGPMs. It maximizes the integrand using `maxim.integrand` function for Laplace approximation if `Sigma_pd` and `mean_pd` are not provided.
+##'
+##' The MCMC procedure involves adaptive step size adjustment based on the acceptance probability (`acc_prob`) and uses a Gaussian proposal distribution centered on the current mean (`mean_curr`) with variance `h`.
+##'
+##' @return An object of class "mcmc.RiskMap" containing:
+##'   \describe{
+##'     \item{samples$S}{Samples of the spatial process.}
+##'     \item{samples$<re_names[i]>}{Samples of each unstructured random effect, named according to columns of ID_re if provided.}
+##'     \item{tuning_par}{Vector of step size (h) values used during MCMC iterations.}
+##'     \item{acceptance_prob}{Vector of acceptance probabilities across MCMC iterations.}
+##'   }
 ##' @export
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
                                   ID_coords, ID_re = NULL,
                                   sigma2_re = NULL,
@@ -1936,7 +2077,7 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
 ##'
 ##' @details
 ##' The function validates the input parameters and ensures they are appropriate for the simulation that is used
-##' in the \code{\link{fit_glgpm}} fitting function.
+##' in the \code{\link{glgpm}} fitting function.
 ##' For non-linear models, it checks that \code{n_sim} is greater than \code{burnin}, that \code{thin} is positive
 ##' and a divisor of \code{(n_sim - burnin)}, and that \code{h}, \code{c1.h}, and \code{c2.h} are within their
 ##' respective valid ranges.
@@ -1957,8 +2098,8 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
 ##' control_params <- set_control_sim(n_sim = 15000, burnin = 3000, thin = 20)
 ##'
 ##' @seealso \code{\link[Matrix]{Matrix}}, \code{\link[Matrix]{forceSymmetric}}
-##' @author
-##' Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @importFrom Matrix Matrix forceSymmetric
 ##' @export
 set_control_sim <- function (n_sim  = 12000, burnin = 2000, thin = 10, h = NULL, c1.h = 0.01, c2.h = 1e-04,
@@ -1989,7 +2130,6 @@ set_control_sim <- function (n_sim  = 12000, burnin = 2000, thin = 10, h = NULL,
 
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @importFrom Matrix Matrix forceSymmetric
-##' @export
 glgpm_nong <-
 function(y, D, coords, units_m, kappa,
            par0, cov_offset,

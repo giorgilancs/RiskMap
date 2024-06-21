@@ -40,7 +40,7 @@ other parameters necessary for the simulation.
 }
 \details{
 The function validates the input parameters and ensures they are appropriate for the simulation that is used
-in the \code{\link{fit_glgpm}} fitting function.
+in the \code{\link{glgpm}} fitting function.
 For non-linear models, it checks that \code{n_sim} is greater than \code{burnin}, that \code{thin} is positive
 and a divisor of \code{(n_sim - burnin)}, and that \code{h}, \code{c1.h}, and \code{c2.h} are within their
 respective valid ranges.
@@ -64,4 +64,6 @@ control_params <- set_control_sim(n_sim = 15000, burnin = 3000, thin = 20)
 }
 \author{
 Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}
+
+Claudio Fronterre \email{c.fronterr@lancaster.ac.uk}
 }

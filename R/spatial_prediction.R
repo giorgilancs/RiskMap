@@ -1,6 +1,31 @@
+##' Prediction of the random effects components and covariates effects over a spatial grid using a fitted generalized linear Gaussian process model
+##'
+##' This function computes predictions over a spatial grid using a fitted model
+##' obtained from the \code{\link{glgpm}} function. It provides point predictions and uncertainty
+##' estimates for the specified locations for each component of the model separately: the spatial random effects;
+##' the unstructured random effects (if included); and the covariates effects.
+##'
+##' @param object A RiskMap object obtained from the `glgpm` function.
+##' @param grid_pred An object of class 'sfc', representing the spatial grid over which predictions
+##'                 are to be made. Must be in the same coordinate reference system (CRS) as the
+##'                 object passed to 'object'.
+##' @param predictors Optional. A data frame containing predictor variables used for prediction.
+##' @param re_predictors Optional. A data frame containing predictors for unstructured random effects,
+##'                      if applicable.
+##' @param pred_cov_offset Optional. A numeric vector specifying covariate offsets at prediction locations.
+##' @param control_sim Control parameters for MCMC sampling. Must be an object of class "mcmc.RiskMap" as returned by \code{\link{set_control_sim}}.
+##' @param type Type of prediction. "marginal" for marginal predictions, "joint" for joint predictions.
+##' @param messages Logical. If TRUE, display progress messages. Default is TRUE.
+##'
+##' @return An object of class 'RiskMap.pred.re' containing predicted values, uncertainty estimates,
+##'         and additional information.
+##'
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @importFrom Matrix Matrix forceSymmetric
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @importFrom Matrix solve
 ##' @export
+##'
+
 pred_over_grid <- function(object,
                    grid_pred,
                    predictors = NULL,
@@ -20,6 +45,11 @@ pred_over_grid <- function(object,
     stop("The object passed to 'grid_pred' must be an object
          of class 'sfc'")
   }
+
+  if(class(control_mcmc)!="mcmc.RiskMap") step ("the argument passed to 'control_mcmc' must be an output
+                                                  from the function set_control_sim; see ?set_control_sim
+                                                  for more details")
+
   grid_pred <- st_transform(grid_pred,crs = object$crs)
 
   grp <- st_coordinates(grid_pred)
@@ -385,9 +415,29 @@ pred_over_grid <- function(object,
   return(out)
 }
 
+##' Predictive Target Over a Regular Spatial Grid
+##'
+##' Computes predictions over a regular spatial grid using outputs from the
+##' \code{\link{pred_over_grid}} function.
+##' This function allows for incorporating covariates, offsets, and optional
+##' unstructured random effects into the predictive target.
+##'
+##' @param object Output from `pred_over_grid`, a RiskMap.pred.re object.
+##' @param include_covariates Logical. Include covariates in the predictive target.
+##' @param include_nugget Logical. Include the nugget effect in the predictive target.
+##' @param include_cov_offset Logical. Include the covariate offset in the predictive target.
+##' @param include_re Logical. Include unstructured random effects in the predictive target.
+##' @param f_target Optional. List of functions to apply on the linear predictor samples.
+##' @param pd_summary Optional. List of summary functions to apply on the predicted values.
+##'
+##' @return An object of class 'RiskMap_pred_target_grid' containing predicted values
+##'         and summaries over the regular spatial grid.
+##' @seealso \code{\link{pred_over_grid}}
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @importFrom Matrix Matrix forceSymmetric
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @importFrom Matrix solve
 ##' @export
+##'
 pred_target_grid <- function(object,
                         include_covariates = TRUE,
                         include_nugget = FALSE,
@@ -504,28 +554,78 @@ pred_target_grid <- function(object,
   out$grid_pred <- object$grid_pred
   out$f_target <- names(f_target)
   out$pd_summary <- names(pd_summary)
-  class(out) <- "RiskMap.pred.target.grid"
+  class(out) <- "RiskMap_pred_target_grid"
   return(out)
 }
-
-##' @importFrom terra rast plot as.data.frame
-##' @method plot RiskMap.pred.target.grid
+##' Plot Method for RiskMap_pred_target_grid Objects
+##'
+##' Generates a plot of the predicted values or summaries over the regular spatial grid
+##' from an object of class 'RiskMap_pred_target_grid'.
+##'
+##' @param x An object of class 'RiskMap_pred_target_grid'.
+##' @param which_target Character string specifying which target prediction to plot.
+##' @param which_summary Character string specifying which summary statistic to plot (e.g., "mean", "sd").
+##' @param ... Additional arguments passed to the \code{\link[terra]{plot}} function of the \code{terra} package.
+##'
+##' @importFrom terra as.data.frame rast plot
+##' @method plot RiskMap_pred_target_grid
 ##' @export
 ##'
-plot.RiskMap.pred.target.grid <- function(object,
-                                     which_target,
-                                     which_summary, ...) {
+##' @details
+##' This function requires the 'terra' package for spatial data manipulation and plotting.
+##'
+##' @seealso \code{\link{pred_target_grid}}
+##'
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+plot.RiskMap_pred_target_grid <- function(x, which_target = "linear_target", which_summary = "mean", ...) {
   t_data.frame <-
-    terra::as.data.frame(cbind(st_coordinates(object$grid_pred),
-                               object$target[[which_target]][[which_summary]]),
-                         xy= TRUE)
-  raster_out <- terra::rast(t_data.frame, crs = st_crs(object$grid_pred)$input)
+    terra::as.data.frame(cbind(st_coordinates(x$grid_pred),
+                               x$target[[which_target]][[which_summary]]),
+                         xy = TRUE)
+  raster_out <- terra::rast(t_data.frame, crs = st_crs(x$grid_pred)$input)
 
-  terra::plot(raster_out)
+  terra::plot(raster_out, ...)
 }
 
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+
+##' Predictive Target over a Shapefile
+##'
+##' Computes predictions over a shapefile using outputs from the
+##' \code{\link{pred_over_grid}} function.
+##' This function allows for incorporating covariates, offsets, and optional
+##' unstructured random effects into the predictive target.
+##'
+##' @param object Output from `pred_over_grid`, a RiskMap.pred.re object.
+##' @param shp Spatial dataset (sf or data.frame) representing the shapefile over which predictions are computed.
+##' @param shp_target Function defining the aggregation method for shapefile targets (default is mean).
+##' @param weights Optional numeric vector of weights for spatial predictions.
+##' @param standardize_weights Logical indicating whether to standardize weights (default is FALSE).
+##' @param col_names Column name or index in 'shp' containing region names.
+##' @param include_covariates Logical indicating whether to include covariates in predictions (default is TRUE).
+##' @param include_nugget Logical indicating whether to include the nugget effect (default is FALSE).
+##' @param include_cov_offset Logical indicating whether to include covariate offset in predictions (default is FALSE).
+##' @param include_re Logical indicating whether to include random effects in predictions (default is FALSE).
+##' @param f_target List of target functions to apply to the linear predictor samples.
+##' @param pd_summary List of summary functions (e.g., mean, sd) to summarize target samples.
+##'
+##' @importFrom terra rast as.data.frame
 ##' @export
+##' @details
+##' This function computes predictive targets or summaries over a spatial shapefile
+##' using outputs from 'pred_S'. It requires the 'terra' package for spatial data
+##' manipulation and should be used with 'sf' or 'data.frame' objects representing
+##' the shapefile.
+##'
+##' @return An object of class 'RiskMap_pred_target_shp' containing computed targets,
+##' summaries, and associated spatial data.
+##'
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##'
+##' @seealso
+##' \code{\link{pred_target_grid}}
+##'
 pred_target_shp <- function(object, shp, shp_target=mean,
                             weights = NULL,standardize_weights = FALSE,
                             col_names=NULL,
@@ -706,18 +806,40 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   out$f_target <- names(f_target)
   out$pd_summary <- names(pd_summary)
   out$grid_pred <- object$grid_pred
-  class(out) <- "RiskMap.pred.target.shp"
+  class(out) <- "RiskMap_pred_target_shp"
   return(out)
 }
 
 
+##' Plot Method for RiskMap_pred_target_shp Objects
+##'
+##' Generates a plot of predictive target values or summaries over a shapefile.
+##'
+##' @param x An object of class 'RiskMap_pred_target_shp' containing computed targets,
+##' summaries, and associated spatial data.
+##' @param which_target Character indicating the target type to plot (e.g., "linear_target").
+##' @param which_summary Character indicating the summary type to plot (e.g., "mean", "sd").
+##' @param ... Additional arguments passed to 'scale_fill_distiller' in 'ggplot2'.
+##'
 ##' @importFrom ggplot2 ggplot geom_sf aes scale_fill_distiller
-##' @method plot RiskMap.pred.target.shp
+##' @method plot RiskMap_pred_target_shp
 ##' @export
 ##'
-plot.RiskMap.pred.target.shp <- function(object,
-                                          which_target,
-                                          which_summary, ...) {
+##' @details
+##' This function plots the predictive target values or summaries over a shapefile.
+##' It requires the 'ggplot2' package for plotting and 'sf' objects for spatial data.
+##'
+##' @return A 'ggplot' object showing the plot of the specified predictive target or summary.
+##'
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##'
+##' @seealso
+##' \code{\link{pred_target_shp}}, \code{\link[ggplot2]{ggplot}}, \code{\link[ggplot2]{geom_sf}},
+##' \code{\link[ggplot2]{aes}}, \code{\link[ggplot2]{scale_fill_distiller}}
+##'
+plot.RiskMap_pred_target_shp <- function(x, which_target = "linear_target",
+                                         which_summary = "mean", ...) {
   col_shp_name <- paste(which_target,"_",which_summary,sep="")
 
   out <- ggplot(object$shp) +
