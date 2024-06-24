@@ -561,6 +561,7 @@ pred_target_grid <- function(object,
   class(out) <- "RiskMap_pred_target_grid"
   return(out)
 }
+
 ##' Plot Method for RiskMap_pred_target_grid Objects
 ##'
 ##' Generates a plot of the predicted values or summaries over the regular spatial grid
@@ -570,15 +571,17 @@ pred_target_grid <- function(object,
 ##' @param which_target Character string specifying which target prediction to plot.
 ##' @param which_summary Character string specifying which summary statistic to plot (e.g., "mean", "sd").
 ##' @param ... Additional arguments passed to the \code{\link[terra]{plot}} function of the \code{terra} package.
+##' @return A \code{ggplot} object representing the specified prediction target or summary statistic over the spatial grid.
+##' @details
+##' This function requires the 'terra' package for spatial data manipulation and plotting.
+##' It plots the values or summaries over a regular spatial grid, allowing for visual examination of spatial patterns.
+##'
+##' @seealso \code{\link{pred_target_grid}}
 ##'
 ##' @importFrom terra as.data.frame rast plot
 ##' @method plot RiskMap_pred_target_grid
 ##' @export
 ##'
-##' @details
-##' This function requires the 'terra' package for spatial data manipulation and plotting.
-##'
-##' @seealso \code{\link{pred_target_grid}}
 ##'
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
@@ -771,7 +774,7 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   inter <- st_intersects(shp, object$grid_pred)
 
   for(h in 1:n_reg) {
-    cat("Computing predictive target for:",shp[[col_names]][h])
+    message("Computing predictive target for:",shp[[col_names]][h])
     if(length(inter[[h]])==0) {
       stop(paste("No points on the grid fall within", shp[[col_names]][h]))
     }
@@ -792,7 +795,7 @@ pred_target_shp <- function(object, shp, shp_target=mean,
           pd_summary[[j]](target_samples_i)
       }
     }
-    cat(" \n")
+    message(" \n")
   }
 
   for(i in 1:n_f) {
@@ -814,7 +817,6 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   return(out)
 }
 
-
 ##' Plot Method for RiskMap_pred_target_shp Objects
 ##'
 ##' Generates a plot of predictive target values or summaries over a shapefile.
@@ -824,24 +826,20 @@ pred_target_shp <- function(object, shp, shp_target=mean,
 ##' @param which_target Character indicating the target type to plot (e.g., "linear_target").
 ##' @param which_summary Character indicating the summary type to plot (e.g., "mean", "sd").
 ##' @param ... Additional arguments passed to 'scale_fill_distiller' in 'ggplot2'.
-##'
-##' @importFrom ggplot2 ggplot geom_sf aes scale_fill_distiller
-##' @method plot RiskMap_pred_target_shp
-##' @export
-##'
+##' @return A \code{ggplot} object showing the plot of the specified predictive target or summary.
 ##' @details
 ##' This function plots the predictive target values or summaries over a shapefile.
 ##' It requires the 'ggplot2' package for plotting and 'sf' objects for spatial data.
-##'
-##' @return A 'ggplot' object showing the plot of the specified predictive target or summary.
-##'
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##'
 ##' @seealso
 ##' \code{\link{pred_target_shp}}, \code{\link[ggplot2]{ggplot}}, \code{\link[ggplot2]{geom_sf}},
 ##' \code{\link[ggplot2]{aes}}, \code{\link[ggplot2]{scale_fill_distiller}}
 ##'
+##' @importFrom ggplot2 ggplot geom_sf aes scale_fill_distiller
+##' @method plot RiskMap_pred_target_shp
+##' @export
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 plot.RiskMap_pred_target_shp <- function(x, which_target = "linear_target",
                                          which_summary = "mean", ...) {
   col_shp_name <- paste(which_target,"_",which_summary,sep="")

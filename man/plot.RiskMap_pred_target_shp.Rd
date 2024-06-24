@@ -17,7 +17,7 @@ summaries, and associated spatial data.}
 \item{...}{Additional arguments passed to 'scale_fill_distiller' in 'ggplot2'.}
 }
 \value{
-A 'ggplot' object showing the plot of the specified predictive target or summary.
+A \code{ggplot} object showing the plot of the specified predictive target or summary.
 }
 \description{
 Generates a plot of predictive target values or summaries over a shapefile.

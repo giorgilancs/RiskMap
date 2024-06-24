@@ -36,13 +36,6 @@ This function computes the standard errors and p-values for the parameters of a 
 \note{
 Handles both Gaussian and non-Gaussian families, and accounts for fixed and random effects in the model.
 }
-\examples{
-\dontrun{
-# Assuming `fit` is an object of class "RiskMap" obtained from glgpm
-summary_fit <- summary(fit)
-print(summary_fit)
-}
-}
 \seealso{
 \code{\link{glgpm}}, \code{\link{coef.RiskMap}}
 }

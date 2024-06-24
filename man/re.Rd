@@ -24,17 +24,6 @@ The function constructs a list that includes the specified terms for the random 
 \note{
 At least one variable must be provided as input.
 }
-\examples{
-\dontrun{
-# Example with a single random effect variable
-re_spec <- re(group)
-print(re_spec)
-
-# Example with multiple random effect variables
-re_spec <- re(group, time)
-print(re_spec)
-}
-}
 \author{
 Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}
 

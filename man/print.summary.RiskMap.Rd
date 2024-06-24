@@ -31,12 +31,6 @@ This function prints a detailed summary of a fitted "RiskMap" model, including:
   \item Akaike Information Criterion (AIC) for Gaussian models.
 }
 }
-\examples{
-\dontrun{
-# Assuming `summary_fit` is an object of class "summary.RiskMap"
-print(summary_fit)
-}
-}
 \author{
 Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}
 

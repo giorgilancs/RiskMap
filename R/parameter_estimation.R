@@ -11,7 +11,7 @@
 ##' @param control_mcmc Control parameters for MCMC sampling. Must be an object of class "mcmc.RiskMap" as returned by \code{\link{set_control_sim}}.
 ##' @param par0 Optional list of initial parameter values for the MCMC algorithm.
 ##' @param S_samples Optional matrix of pre-specified sample paths for the spatial random effect.
-##' @param save_samples Logical indicating whether to save MCMC samples. Defaults to FALSE.
+##' @param return_samples Logical indicating whether to return MCMC samples when fitting a Binomial or Poisson model. Defaults to FALSE.
 ##' @param messages Logical indicating whether to print progress messages. Defaults to TRUE.
 ##' @param fix_var_me Optional fixed value for the measurement error variance.
 ##' @param start_pars Optional list of starting values for model parameters: beta (regression coefficients), sigma2 (spatial process variance), tau2 (nugget effect variance), phi (spatial correlation scale), sigma2_me (measurement error variance), and sigma2_re (random effects variances).
@@ -50,13 +50,6 @@
 ##' @seealso \code{\link{set_control_sim}}, \code{\link{summary.RiskMap}}, \code{\link{to_table}}
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
-##' @examples
-##' \dontrun{
-##' # Example usage with Gaussian family
-##' data <- your_spatial_data
-##' fit <- glgpm(y ~ x1 + x2 + re(group) + gp(coords), data = data, family = "gaussian")
-##' summary(fit)
-##' }
 ##' @importFrom sf st_crs st_as_sf st_drop_geometry
 ##' @export
 glgpm <- function(formula,
@@ -69,7 +62,7 @@ glgpm <- function(formula,
                  control_mcmc = set_control_sim(),
                  par0=NULL,
                  S_samples = NULL,
-                 save_samples = F,
+                 return_samples = TRUE,
                  messages = TRUE,
                  fix_var_me = NULL,
                  start_pars = list(beta = NULL,
@@ -222,7 +215,7 @@ glgpm <- function(formula,
     data <- st_transform(data, crs = convert_to_crs)
     crs <- convert_to_crs
   }
-  if(messages) cat("The CRS used is", as.list(st_crs(data))$input, "\n")
+  if(messages) message("The CRS used is", as.list(st_crs(data))$input, "\n")
 
   coords_o <- st_coordinates(data)
   coords <- unique(coords_o)
@@ -244,9 +237,9 @@ glgpm <- function(formula,
   if(scale_to_km) {
     coords_o <- coords_o/1000
     coords <- coords/1000
-    if(messages) cat("Distances between locations are computed in kilometers \n")
+    if(messages) message("Distances between locations are computed in kilometers \n")
   } else {
-    if(messages) cat("Distances between locations are computed in meters \n")
+    if(messages) message("Distances between locations are computed in meters \n")
   }
 
 
@@ -342,6 +335,7 @@ glgpm <- function(formula,
     res <- glgpm_nong(y = y, D, coords, units_m, kappa = inter_f$gp.spec$kappa,
                         ID_coords, ID_re, s_unique, re_unique,
                         fix_tau2, family = family,
+                        return_samples = return_samples,
                         par0 = par0, cov_offset = cov_offset,
                         start_beta = start_pars$beta,
                         start_cov_pars = c(start_pars$sigma2,
@@ -1481,7 +1475,7 @@ glgpm_sim <- function(n_sim,
     data <- st_transform(data, crs = convert_to_crs)
     crs <- convert_to_crs
   }
-  if(messages) cat("The CRS used is", as.list(st_crs(data))$input, "\n")
+  if(messages) message("The CRS used is", as.list(st_crs(data))$input, "\n")
 
   coords_o <- st_coordinates(data)
   coords <- unique(coords_o)
@@ -1503,9 +1497,9 @@ glgpm_sim <- function(n_sim,
   if(scale_to_km) {
     coords_o <- coords_o/1000
     coords <- coords/1000
-    if(messages) cat("Distances between locations are computed in kilometers \n")
+    if(messages) message("Distances between locations are computed in kilometers \n")
   } else {
-    if(messages) cat("Distances between locations are computed in meters \n")
+    if(messages) message("Distances between locations are computed in meters \n")
   }
 
   # Simulate S
@@ -2025,7 +2019,7 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
   n_samples <- (n_sim-burnin)/thin
   sim <- matrix(NA,nrow=n_samples, ncol=n_tot)
 
-  if(messages) cat("\n - Conditional simulation (burnin=",
+  if(messages) message("\n - Conditional simulation (burnin=",
                      control_mcmc$burnin,", thin=",control_mcmc$thin,"): \n \n",sep="")
   h.vec <- rep(NA,n_sim)
   acc_prob <- rep(NA,n_sim)
@@ -2147,7 +2141,7 @@ glgpm_nong <-
 function(y, D, coords, units_m, kappa,
            par0, cov_offset,
            ID_coords, ID_re, s_unique, re_unique,
-           fix_tau2, family,
+           fix_tau2, family,return_samples,
            start_beta,
            start_cov_pars,
            control_mcmc,
@@ -2180,7 +2174,7 @@ function(y, D, coords, units_m, kappa,
   sigma2_re_0 <- par0$sigma2_re
 
 
-  if(messages) cat("\n - Obtaining covariance matrix and mean for the proposal distribution of the MCMC \n \n")
+  if(messages) message("\n - Obtaining covariance matrix and mean for the proposal distribution of the MCMC \n \n")
   out_maxim <-
     maxim.integrand(y = y, units_m = units_m, Sigma = Sigma0, mu = mu0,
                     ID_coords = ID_coords, ID_re = ID_re,
@@ -2200,6 +2194,7 @@ function(y, D, coords, units_m, kappa,
                           messages = messages)
 
   S_tot_samples <- simulation$samples$S
+
   p <- ncol(D)
 
   ind_beta <- 1:p
@@ -2555,7 +2550,7 @@ function(y, D, coords, units_m, kappa,
   hess.MLE <- hess.MC.log.lik(estim$par)
   out$covariance <- solve(-hess.MLE)
   out$log.lik <- -estim$objective
-
+  if(return_samples) out$S_samples <- S_tot_samples
   class(out) <- "RiskMap"
   return(out)
 }

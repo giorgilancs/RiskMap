@@ -16,7 +16,7 @@ glgpm(
   control_mcmc = set_control_sim(),
   par0 = NULL,
   S_samples = NULL,
-  save_samples = F,
+  return_samples = TRUE,
   messages = TRUE,
   fix_var_me = NULL,
   start_pars = list(beta = NULL, sigma2 = NULL, tau2 = NULL, phi = NULL, sigma2_me =
@@ -46,7 +46,7 @@ glgpm(
 
 \item{S_samples}{Optional matrix of pre-specified sample paths for the spatial random effect.}
 
-\item{save_samples}{Logical indicating whether to save MCMC samples. Defaults to FALSE.}
+\item{return_samples}{Logical indicating whether to return MCMC samples when fitting a Binomial or Poisson model. Defaults to FALSE.}
 
 \item{messages}{Logical indicating whether to print progress messages. Defaults to TRUE.}
 
@@ -90,14 +90,6 @@ The \code{convert_to_crs} argument can be used to reproject the spatial coordina
 The \code{control_mcmc} argument specifies the control parameters for MCMC sampling. This argument must be an object returned by \code{\link{set_control_sim}}.
 
 The \code{start_pars} argument allows for specifying starting values for the model parameters. If not provided, default starting values are used.
-}
-\examples{
-\dontrun{
-# Example usage with Gaussian family
-data <- your_spatial_data
-fit <- glgpm(y ~ x1 + x2 + re(group) + gp(coords), data = data, family = "gaussian")
-summary(fit)
-}
 }
 \seealso{
 \code{\link{set_control_sim}}, \code{\link{summary.RiskMap}}, \code{\link{to_table}}

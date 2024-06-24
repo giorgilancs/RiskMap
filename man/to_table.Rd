@@ -27,13 +27,6 @@ This function takes a fitted "RiskMap" model and converts it into an \code{xtabl
 }
 The \code{xtable} object can be customized further using additional arguments and then printed as a LaTeX or HTML table.
 }
-\examples{
-\dontrun{
-# Assuming `riskmap_fit` is an object of class "RiskMap"
-latex_table <- to_table(riskmap_fit)
-print(latex_table, type = "latex")
-}
-}
 \seealso{
 \code{\link{glgpm}}, \code{\link[xtable]{xtable}}
 }

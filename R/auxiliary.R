@@ -166,20 +166,6 @@ matern.hessian.phi <- function(U, phi, kappa) {
 ##' @note The nugget effect must be a positive real number if specified.
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
-##' @examples
-##' \dontrun{
-##' # Example with two spatial coordinates x and y
-##' gp_spec <- gp(x, y, kappa = 1.5, nugget = 0.1)
-##' print(gp_spec)
-##'
-##' # Example with a single spatial coordinate x
-##' gp_spec <- gp(x, kappa = 0.8)
-##' print(gp_spec)
-##'
-##' # Example with default parameters
-##' gp_spec <- gp()
-##' print(gp_spec)
-##' }
 ##' @export
 gp <- function (..., kappa = 0.5, nugget = 0) {
   vars <- as.list(substitute(list(...)))[-1]
@@ -225,16 +211,6 @@ gp <- function (..., kappa = 0.5, nugget = 0) {
 ##' @note At least one variable must be provided as input.
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
-##' @examples
-##' \dontrun{
-##' # Example with a single random effect variable
-##' re_spec <- re(group)
-##' print(re_spec)
-##'
-##' # Example with multiple random effect variables
-##' re_spec <- re(group, time)
-##' print(re_spec)
-##' }
 ##' @export
 re <- function (...) {
   vars <- as.list(substitute(list(...)))[-1]
@@ -327,12 +303,6 @@ interpret.formula <- function(formula) {
 ##' @note This function handles both Gaussian and non-Gaussian families, and accounts for fixed and random effects in the model.
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
-##' @examples
-##' \dontrun{
-##' # Assuming `fit` is an object of class "RiskMap" obtained from glgpm
-##' estimates <- coef(fit)
-##' print(estimates)
-##' }
 ##' @seealso \code{\link{glgpm}}
 ##' @method coef RiskMap
 ##' @export
@@ -433,12 +403,6 @@ coef.RiskMap <- function(object,...) {
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @note Handles both Gaussian and non-Gaussian families, and accounts for fixed and random effects in the model.
-##' @examples
-##' \dontrun{
-##' # Assuming `fit` is an object of class "RiskMap" obtained from glgpm
-##' summary_fit <- summary(fit)
-##' print(summary_fit)
-##' }
 ##' @seealso \code{\link{glgpm}}, \code{\link{coef.RiskMap}}
 ##' @method summary RiskMap
 ##' @export
@@ -579,11 +543,6 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @method print summary.RiskMap
 ##' @export
-##' @examples
-##' \dontrun{
-##' # Assuming `summary_fit` is an object of class "summary.RiskMap"
-##' print(summary_fit)
-##' }
 print.summary.RiskMap <- function(x, ...) {
   if(x$family=="gaussian") {
     cat("Linear geostatsitical model \n")
@@ -643,12 +602,6 @@ print.summary.RiskMap <- function(x, ...) {
 ##' @importFrom xtable xtable
 ##' @export
 ##' @seealso \code{\link{glgpm}}, \code{\link[xtable]{xtable}}
-##' @examples
-##' \dontrun{
-##' # Assuming `riskmap_fit` is an object of class "RiskMap"
-##' latex_table <- to_table(riskmap_fit)
-##' print(latex_table, type = "latex")
-##' }
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##'

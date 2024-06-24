@@ -15,12 +15,16 @@
 
 \item{...}{Additional arguments passed to the \code{\link[terra]{plot}} function of the \code{terra} package.}
 }
+\value{
+A \code{ggplot} object representing the specified prediction target or summary statistic over the spatial grid.
+}
 \description{
 Generates a plot of the predicted values or summaries over the regular spatial grid
 from an object of class 'RiskMap_pred_target_grid'.
 }
 \details{
 This function requires the 'terra' package for spatial data manipulation and plotting.
+It plots the values or summaries over a regular spatial grid, allowing for visual examination of spatial patterns.
 }
 \seealso{
 \code{\link{pred_target_grid}}

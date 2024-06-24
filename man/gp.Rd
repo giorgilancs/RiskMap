@@ -30,21 +30,6 @@ The function constructs a list that includes the specified terms (spatial coordi
 \note{
 The nugget effect must be a positive real number if specified.
 }
-\examples{
-\dontrun{
-# Example with two spatial coordinates x and y
-gp_spec <- gp(x, y, kappa = 1.5, nugget = 0.1)
-print(gp_spec)
-
-# Example with a single spatial coordinate x
-gp_spec <- gp(x, kappa = 0.8)
-print(gp_spec)
-
-# Example with default parameters
-gp_spec <- gp()
-print(gp_spec)
-}
-}
 \author{
 Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}
 

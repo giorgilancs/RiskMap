@@ -30,13 +30,6 @@ The function processes the \code{RiskMap} object to extract and name the estimat
 \note{
 This function handles both Gaussian and non-Gaussian families, and accounts for fixed and random effects in the model.
 }
-\examples{
-\dontrun{
-# Assuming `fit` is an object of class "RiskMap" obtained from glgpm
-estimates <- coef(fit)
-print(estimates)
-}
-}
 \seealso{
 \code{\link{glgpm}}
 }
