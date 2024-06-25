@@ -1,84 +1,73 @@
+#' @importFrom stats as.formula binomial coef complete.cases
+#' @importFrom stats glm median model.frame model.matrix
+#' @importFrom stats model.response na.fail na.omit nlminb pnorm
+#' @importFrom stats poisson printCoefmat qnorm reformulate rnorm
+#' @importFrom stats runif sd step terms terms.formula update
 
-##' @title EPSG of the UTM zone
-##' @description Suggests EPSG of the UTM in which the majority of data falls in.
-##' @param data an object of class \code{sf} containing the variable for which the variogram
-##' is to be computed and the coordinates
-##' @details The function checks in which UTM zone and empishere the majority of the
-##' data fall in and proposes an EPSG.
-##'
-##' @return an integer indicating the EPSG of the UTM zone.
-##'
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @title EPSG of the UTM Zone
+##' @description Suggests the EPSG code for the UTM zone where the majority of the data falls.
+##' @param data An object of class \code{sf} containing the coordinates.
+##' @details The function determines the UTM zone and hemisphere where the majority of the data points are located and proposes the corresponding EPSG code.
+##' @return An integer indicating the EPSG code of the UTM zone.
+##' @author
+##' Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @importFrom sf st_transform st_coordinates
 ##' @export
-##'
 propose_utm <- function(data) {
   if(class(data)[1] != "sf") stop("'data' must be an object of class sf")
-  if(is.na(st_crs(data))) stop("the CRS of the data is missing
-                               and must be specified; see ?st_crs")
+  if(is.na(st_crs(data))) stop("the CRS of the data is missing and must be specified; see ?st_crs")
 
-  data <- st_transform(data,crs=4326)
+  data <- st_transform(data, crs = 4326)
   utm_z <- floor((st_coordinates(data)[,2] + 180) / 6) + 1
   utm_z_u <- unique(utm_z)
   if(length(utm_z_u) > 1) {
     tab_utm <- table(utm_z)
-    if(all(diff(tab_utm)==0)) warning("an equal amount of locations falls
-                                      in different UTM zones")
+    if(all(diff(tab_utm) == 0)) warning("an equal amount of locations falls in different UTM zones")
     utm_z_u <- as.numeric(names(which.max(tab_utm)))
   }
-  ns <- sign(st_coordinates(data)[,1] )
+  ns <- sign(st_coordinates(data)[,1])
   ns_u <- unique(ns)
   if(length(ns_u) > 1) {
     tab_ns <- table(ns_u)
-    if(all(diff(tab_ns)==0)) warning("an equal amount of locations falls
-                                      north and south of the Equator")
+    if(all(diff(tab_ns) == 0)) warning("an equal amount of locations falls north and south of the Equator")
     ns_u <- as.numeric(names(which.max(tab_ns)))
   }
-  if (ns_u==1) {
-    out <- as.numeric(paste(326,utm_z_u,sep=""))
-  } else if(ns_u==-1) {
-    out <- as.numeric(paste(327,utm_z_u,sep=""))
+  if (ns_u == 1) {
+    out <- as.numeric(paste(326, utm_z_u, sep = ""))
+  } else if(ns_u == -1) {
+    out <- as.numeric(paste(327, utm_z_u, sep = ""))
   }
   return(out)
 }
 
-##' @title Matern correlation function
-##' @description Computes the matern correlation function.
-##' @param u 	a vector with values of the distances between pairs of data locations
-##' @param phi 	value of the scale parameter \eqn{\phi}.
-##' @param kappa 	value of the smoothness parameter \eqn{\kappa}.
-##' @param return_sym_matrix a logical value which indicates whether a symmetric
-##' correlation matrix should be return. By default \code{return_sym_matrix=FALSE}.
+##' @title Matern Correlation Function
+##' @description Computes the Matern correlation function.
+##' @param u A vector of distances between pairs of data locations.
+##' @param phi The scale parameter \eqn{\phi}.
+##' @param kappa The smoothness parameter \eqn{\kappa}.
+##' @param return_sym_matrix A logical value indicating whether to return a symmetric correlation matrix. Defaults to \code{FALSE}.
 ##' @details The Matern correlation function is defined as
-##' \deqn{\rho(u; \phi; \kappa) = (2^{\kappa-1})^{-1}(u/\phi)^\kappa K_{\kappa}(u/\phi)}
-##' where \eqn{\phi} and \eqn{\kappa} are the scale and smoothness parameters, and
-##'  and \eqn{K_{\kappa}(\cdot)} denotes the the modified Bessel function of the third
-##'  kind of order \eqn{\kappa}. The parameters \eqn{\phi} and \eqn{\kappa} must be
-##'  positive.
-##'
-##' @return A vector of the same length of \code{u} with the value of the Matern
-##' correlation function for the given distances, if \code{return_sym_matrix=FALSE}.
-##' If \code{return_sym_matrix=TRUE}, a symmetric correlation matrix is returned.
-##'
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' \deqn{\rho(u; \phi; \kappa) = (2^{\kappa-1})^{-1}(u/\phi)^\kappa K_{\kappa}(u/\phi)}
+##' where \eqn{\phi} and \eqn{\kappa} are the scale and smoothness parameters, and \eqn{K_{\kappa}(\cdot)} denotes the modified Bessel function of the third kind of order \eqn{\kappa}. The parameters \eqn{\phi} and \eqn{\kappa} must be positive.
+##' @return A vector of the same length as \code{u} with the values of the Matern correlation function for the given distances, if \code{return_sym_matrix=FALSE}. If \code{return_sym_matrix=TRUE}, a symmetric correlation matrix is returned.
 ##' @importFrom sf st_transform st_coordinates
 ##' @export
-##'
 matern_cor <- function(u, phi, kappa, return_sym_matrix = FALSE) {
   if (is.vector(u))
     names(u) <- NULL
   if (is.matrix(u))
     dimnames(u) <- list(NULL, NULL)
-  uphi <- u/phi
+  uphi <- u / phi
   uphi <- ifelse(u > 0, (((2^(-(kappa - 1)))/ifelse(0, Inf,
                                                     gamma(kappa))) * (uphi^kappa) * besselK(x = uphi, nu = kappa)),
                  1)
   uphi[u > 600 * phi] <- 0
 
   if(return_sym_matrix) {
-    n <- (1+sqrt(1+8*length(uphi)))/2
+    n <- (1 + sqrt(1 + 8 * length(uphi))) / 2
     varcov <- matrix(NA, n, n)
     varcov[lower.tri(varcov)] <- uphi
     varcov <- t(varcov)
@@ -91,78 +80,93 @@ matern_cor <- function(u, phi, kappa, return_sym_matrix = FALSE) {
   return(out)
 }
 
-##' @title First derivative wtr phi
-##' @description Computes the first derivative of the Matern correlation
-##' function with respect to \eqn{\phi}.
-##' @param U 	a vector with values of the distances between pairs of data locations.
-##' @param phi 	value of the scale parameter \eqn{\phi}.
-##' @param kappa 	value of the smoothness parameter \eqn{\kappa}.
-##' @return A matrix with the values of the first derivative of the Matern function
-##' with respect to \eqn{\phi} for the given distances
-matern.grad.phi <- function(U,phi,kappa) {
-  der.phi <- function(u,phi,kappa) {
-    u <- u+10e-16
-    if(kappa==0.5) {
-      out <- (u*exp(-u/phi))/phi^2
+##' @title First Derivative with Respect to \eqn{\phi}
+##' @description Computes the first derivative of the Matern correlation function with respect to \eqn{\phi}.
+##' @param U A vector of distances between pairs of data locations.
+##' @param phi The scale parameter \eqn{\phi}.
+##' @param kappa The smoothness parameter \eqn{\kappa}.
+##' @return A matrix with the values of the first derivative of the Matern function with respect to \eqn{\phi} for the given distances.
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @export
+matern.grad.phi <- function(U, phi, kappa) {
+  der.phi <- function(u, phi, kappa) {
+    u <- u + 10e-16
+    if(kappa == 0.5) {
+      out <- (u * exp(-u / phi)) / phi^2
     } else {
-      out <- ((besselK(u/phi,kappa+1)+besselK(u/phi,kappa-1))*
-                phi^(-kappa-2)*u^(kappa+1))/(2^kappa*gamma(kappa))-
-        (kappa*2^(1-kappa)*besselK(u/phi,kappa)*phi^(-kappa-1)*
-           u^kappa)/gamma(kappa)
+      out <- ((besselK(u / phi, kappa + 1) + besselK(u / phi, kappa - 1)) *
+                phi^(-kappa - 2) * u^(kappa + 1)) / (2^kappa * gamma(kappa)) -
+        (kappa * 2^(1 - kappa) * besselK(u / phi, kappa) * phi^(-kappa - 1) *
+           u^kappa) / gamma(kappa)
     }
     out
   }
 
-  n <- attr(U,"Size")
-  grad.phi.mat <- matrix(NA,nrow=n,ncol=n)
+  n <- attr(U, "Size")
+  grad.phi.mat <- matrix(NA, nrow = n, ncol = n)
   ind <- lower.tri(grad.phi.mat)
-  grad.phi <- der.phi(as.numeric(U),phi,kappa)
+  grad.phi <- der.phi(as.numeric(U), phi, kappa)
   grad.phi.mat[ind] <-  grad.phi
   grad.phi.mat <- t(grad.phi.mat)
   grad.phi.mat[ind] <-  grad.phi
-  diag(grad.phi.mat) <- rep(der.phi(0,phi,kappa),n)
+  diag(grad.phi.mat) <- rep(der.phi(0, phi, kappa), n)
   grad.phi.mat
 }
 
-##' @title Second derivative wtr phi
-##' @description Computes the second derivative of the Matern correlation
-##' function with respect to \eqn{\phi}.
-##' @param U 	a vector with values of the distances between pairs of data locations.
-##' @param phi 	value of the scale parameter \eqn{\phi}.
-##' @param kappa 	value of the smoothness parameter \eqn{\kappa}.
-##' @return A matrix with the values of the second derivative of the Matern function
-##' with respect to \eqn{\phi} for the given distances
-matern.hessian.phi <- function(U,phi,kappa) {
-  der2.phi <- function(u,phi,kappa) {
-    u <- u+10e-16
-    if(kappa==0.5) {
-      out <- (u*(u-2*phi)*exp(-u/phi))/phi^4
+##' @title Second Derivative with Respect to \eqn{\phi}
+##' @description Computes the second derivative of the Matern correlation function with respect to \eqn{\phi}.
+##' @param U A vector of distances between pairs of data locations.
+##' @param phi The scale parameter \eqn{\phi}.
+##' @param kappa The smoothness parameter \eqn{\kappa}.
+##' @return A matrix with the values of the second derivative of the Matern function with respect to \eqn{\phi} for the given distances.
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @export
+matern.hessian.phi <- function(U, phi, kappa) {
+  der2.phi <- function(u, phi, kappa) {
+    u <- u + 10e-16
+    if(kappa == 0.5) {
+      out <- (u * (u - 2 * phi) * exp(-u / phi)) / phi^4
     } else {
-      bk <- besselK(u/phi,kappa)
-      bk.p1 <- besselK(u/phi,kappa+1)
-      bk.p2 <- besselK(u/phi,kappa+2)
-      bk.m1 <- besselK(u/phi,kappa-1)
-      bk.m2 <- besselK(u/phi,kappa-2)
-      out <- (2^(-kappa-1)*phi^(-kappa-4)*u^kappa*(bk.p2*u^2+2*bk*u^2+
-                                                     bk.m2*u^2-4*kappa*bk.p1*phi*u-4*
-                                                     bk.p1*phi*u-4*kappa*bk.m1*phi*u-4*bk.m1*phi*u+
-                                                     4*kappa^2*bk*phi^2+4*kappa*bk*phi^2))/(gamma(kappa))
+      bk <- besselK(u / phi, kappa)
+      bk.p1 <- besselK(u / phi, kappa + 1)
+      bk.p2 <- besselK(u / phi, kappa + 2)
+      bk.m1 <- besselK(u / phi, kappa - 1)
+      bk.m2 <- besselK(u / phi, kappa - 2)
+      out <- (2^(-kappa - 1) * phi^(-kappa - 4) * u^kappa * (bk.p2 * u^2 + 2 * bk * u^2 +
+                                                               bk.m2 * u^2 - 4 * kappa * bk.p1 * phi * u - 4 *
+                                                               bk.p1 * phi * u - 4 * kappa * bk.m1 * phi * u - 4 * bk.m1 * phi * u +
+                                                               4 * kappa^2 * bk * phi^2 + 4 * kappa * bk * phi^2)) / (gamma(kappa))
     }
     out
   }
-  n <- attr(U,"Size")
-  hess.phi.mat <- matrix(NA,nrow=n,ncol=n)
+  n <- attr(U, "Size")
+  hess.phi.mat <- matrix(NA, nrow = n, ncol = n)
   ind <- lower.tri(hess.phi.mat)
-  hess.phi <- der2.phi(as.numeric(U),phi,kappa)
+  hess.phi <- der2.phi(as.numeric(U), phi, kappa)
   hess.phi.mat[ind] <-  hess.phi
   hess.phi.mat <- t(hess.phi.mat)
   hess.phi.mat[ind] <-  hess.phi
-  diag(hess.phi.mat) <- rep(der2.phi(0,phi,kappa),n)
+  diag(hess.phi.mat) <- rep(der2.phi(0, phi, kappa), n)
   hess.phi.mat
 }
-
+##' @title Gaussian Process Model Specification
+##' @description Specifies the terms, smoothness, and nugget effect for a Gaussian Process (GP) model.
+##' @param ... Variables representing the spatial coordinates or covariates for the GP model.
+##' @param kappa The smoothness parameter \eqn{\kappa}. Default is 0.5.
+##' @param nugget The nugget effect, which represents the variance of the measurement error. Default is 0. A positive numeric value must be provided if not using the default.
+##' @details The function constructs a list that includes the specified terms (spatial coordinates or covariates), the smoothness parameter \eqn{\kappa}, and the nugget effect. This list can be used as a specification for a Gaussian Process model.
+##' @return A list of class \code{gp.spec} containing the following elements:
+##' \item{term}{A character vector of the specified terms.}
+##' \item{kappa}{The smoothness parameter \eqn{\kappa}.}
+##' \item{nugget}{The nugget effect.}
+##' \item{dim}{The number of specified terms.}
+##' \item{label}{A character string representing the full call for the GP model.}
+##' @note The nugget effect must be a positive real number if specified.
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @export
-##'
 gp <- function (..., kappa = 0.5, nugget = 0) {
   vars <- as.list(substitute(list(...)))[-1]
   d <- length(vars)
@@ -173,7 +177,6 @@ gp <- function (..., kappa = 0.5, nugget = 0) {
        (is.numeric(nugget) & nugget <0)) stop("when 'nugget' is not NULL, this must be a positive
                                  real number")
   }
-
 
   if (d == 0) {
     term <- "sf"
@@ -197,14 +200,23 @@ gp <- function (..., kappa = 0.5, nugget = 0) {
   class(ret) <- "gp.spec"
   ret
 }
-
+##' @title Random Effect Model Specification
+##' @description Specifies the terms for a random effect model.
+##' @param ... Variables representing the random effects in the model.
+##' @details The function constructs a list that includes the specified terms for the random effects. This list can be used as a specification for a random effect model.
+##' @return A list of class \code{re.spec} containing the following elements:
+##' \item{term}{A character vector of the specified terms.}
+##' \item{dim}{The number of specified terms.}
+##' \item{label}{A character string representing the full call for the random effect model.}
+##' @note At least one variable must be provided as input.
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @export
-##'
-re <- function (...)
-{
+re <- function (...) {
   vars <- as.list(substitute(list(...)))[-1]
   d <- length(vars)
   term <- NULL
+
   if (d == 0) {
     stop("You need to provide at least one variable.")
   } else {
@@ -225,6 +237,7 @@ re <- function (...)
   class(ret) <- "re.spec"
   ret
 }
+
 
 interpret.formula <- function(formula) {
   p.env <- environment(formula)
@@ -274,17 +287,27 @@ interpret.formula <- function(formula) {
 }
 
 
-##' @title Extracting the parameter estimates from a model fit
-##' @description \code{coef} method for the class "RiskMap" that extracts the
-##' maximum likelihood estimates from the model fits obtained from the function
-##' \code{\link{glgpm}}
-##' @param object an object of class "RiskMap" obatained as result of a call to \code{\link{glgpm}}
-##' @return A vector of the maximum likelihood estimates
+##' @title Extract Parameter Estimates from a "RiskMap" Model Fit
+##' @description This \code{coef} method for the "RiskMap" class extracts the
+##' maximum likelihood estimates from model fits obtained from the \code{\link{glgpm}} function.
+##' @param object An object of class "RiskMap" obtained as a result of a call to \code{\link{glgpm}}.
+##' @param ... other parameters.
+##' @return A list containing the maximum likelihood estimates:
+##' \item{beta}{A vector of coefficient estimates.}
+##' \item{sigma2}{The estimate for the variance parameter \eqn{\sigma^2}.}
+##' \item{phi}{The estimate for the spatial range parameter \eqn{\phi}.}
+##' \item{tau2}{The estimate for the nugget effect parameter \eqn{\tau^2}, if applicable.}
+##' \item{sigma2_me}{The estimate for the measurement error variance \eqn{\sigma^2_{me}}, if applicable.}
+##' \item{sigma2_re}{A vector of variance estimates for the random effects, if applicable.}
+##' @details The function processes the \code{RiskMap} object to extract and name the estimated parameters appropriately, transforming them if necessary.
+##' @note This function handles both Gaussian and non-Gaussian families, and accounts for fixed and random effects in the model.
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @seealso \code{\link{glgpm}}
 ##' @method coef RiskMap
 ##' @export
 ##'
-coef.RiskMap <- function(object) {
+coef.RiskMap <- function(object,...) {
   n_re <- length(object$re)
   if(n_re > 0) {
     re_names <- names(object$re)
@@ -359,16 +382,33 @@ coef.RiskMap <- function(object) {
   return(res)
 }
 
-##' @title Summarizing model fits
-##' @description \code{summary} method for the class "RiskMap" that computes the standard errors and p-values of likelihood-based model fits.
-##' @param object an object of class "RiskMap" obatained as result of a call to \code{\link{glgpm}}
-##' @return A list with the following components
+##' @title Summarize Model Fits
+##' @description Provides a \code{summary} method for the "RiskMap" class that computes the standard errors and p-values for likelihood-based model fits.
+##' @param object An object of class "RiskMap" obtained as a result of a call to \code{\link{glgpm}}.
+##' @param ... other parameters.
+##' @param conf_level The confidence level for the intervals (default is 0.95).
+##' @return A list containing:
+##' \item{reg_coef}{A matrix with the estimates, standard errors, z-values, p-values, and confidence intervals for the regression coefficients.}
+##' \item{me}{A matrix with the estimates and confidence intervals for the measurement error variance, if applicable.}
+##' \item{sp}{A matrix with the estimates and confidence intervals for the spatial process parameters.}
+##' \item{tau2}{The fixed nugget variance, if applicable.}
+##' \item{ranef}{A matrix with the estimates and confidence intervals for the random effects variances, if applicable.}
+##' \item{conf_level}{The confidence level used for the intervals.}
+##' \item{family}{The family of the model (e.g., "gaussian").}
+##' \item{kappa}{The kappa parameter of the model.}
+##' \item{log.lik}{The log-likelihood of the model fit.}
+##' \item{cov_offset_used}{A logical indicating if a covariance offset was used.}
+##' \item{aic}{The Akaike Information Criterion (AIC) for the model, if applicable.}
+##' @details This function computes the standard errors and p-values for the parameters of a "RiskMap" model, adjusting for the covariance structure if needed.
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @note Handles both Gaussian and non-Gaussian families, and accounts for fixed and random effects in the model.
+##' @seealso \code{\link{glgpm}}, \code{\link{coef.RiskMap}}
 ##' @method summary RiskMap
 ##' @export
-##'
 
-summary.RiskMap <- function(object, conf_level = 0.95) {
+
+summary.RiskMap <- function(object, ..., conf_level = 0.95) {
 
   n_re <- length(object$re)
   if(n_re > 0) {
@@ -482,10 +522,28 @@ summary.RiskMap <- function(object, conf_level = 0.95) {
   return(res)
 }
 
+##' @title Print Summary of RiskMap Model
+##' @description Provides a \code{print} method for the summary of "RiskMap" objects, detailing the model type, parameter estimates, and other relevant statistics.
+##' @param x An object of class "summary.RiskMap".
+##' @param ... other parameters.
+##' @details This function prints a detailed summary of a fitted "RiskMap" model, including:
+##' \itemize{
+##'   \item The type of geostatistical model (e.g., Gaussian, Binomial, Poisson).
+##'   \item Confidence intervals for parameter estimates.
+##'   \item Regression coefficients with their standard errors and p-values.
+##'   \item Measurement error variance, if applicable.
+##'   \item Spatial process parameters, including the Matern covariance parameters.
+##'   \item Variance of the nugget effect, if applicable.
+##'   \item Unstructured random effects variances, if applicable.
+##'   \item Log-likelihood of the model.
+##'   \item Akaike Information Criterion (AIC) for Gaussian models.
+##' }
+##' @return This function is used for its side effect of printing to the console. It does not return a value.
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @method print summary.RiskMap
 ##' @export
-print.summary.RiskMap <- function(x) {
+print.summary.RiskMap <- function(x, ...) {
   if(x$family=="gaussian") {
     cat("Linear geostatsitical model \n")
   } else if(x$family=="binomial") {
@@ -528,19 +586,24 @@ print.summary.RiskMap <- function(x) {
 }
 
 
-##' @title Create table in Latex
-##' @description Convert a model fit into an \code{xtable} object,
-##' which can then be printed as a LaTeX or HTML table.
-##' @param object an object of class "RiskMap" obatained as result of a call to \code{\link{glgpm}}
-##' @param ... 	additional arguments to be passed to \code{\link{xtable}}.
-##'
-##' @return For most \code{xtable} methods, an object of class "xtable" which inherits the \code{data.frame}
-##' class and contains several additional attributes specifying the table formatting options
-##'
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @title Create LaTeX Table from Model Fit
+##' @description Converts a "RiskMap" model fit into an \code{xtable} object, which can then be printed as a LaTeX or HTML table.
+##' @param object An object of class "RiskMap" obtained as a result of a call to \code{\link{glgpm}}.
+##' @param ... Additional arguments to be passed to \code{\link[xtable]{xtable}}.
+##' @details This function takes a fitted "RiskMap" model and converts it into an \code{xtable} object. The resulting table includes:
+##' \itemize{
+##'   \item Regression coefficients with their estimates, confidence intervals, and p-values.
+##'   \item Spatial process parameters.
+##'   \item Random effects variances.
+##'   \item Measurement error variance, if applicable.
+##' }
+##' The \code{xtable} object can be customized further using additional arguments and then printed as a LaTeX or HTML table.
+##' @return An object of class "xtable" which inherits the \code{data.frame} class and contains several additional attributes specifying the table formatting options.
 ##' @importFrom xtable xtable
 ##' @export
+##' @seealso \code{\link{glgpm}}, \code{\link[xtable]{xtable}}
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##'
 to_table <- function(object, ...) {
   summary_out <- summary(object)

@@ -1,15 +1,24 @@
 Package: RiskMap
 Type: Package
-Title: Geostatistical Modeling of Spatially Referenced Data
+Title: Geo-Statistical Modeling of Spatially Referenced Data
 Version: 0.1.0
-Author: Emanuele Giorgi, Claudio Fronterre
-Maintainer: Emanuele Giorgi <e.giorgi@lancaster.ac.uk>
-Description: Provides functions for likelihood-based inference of spatially referenced data. 
+Authors@R: 
+  c(person(given = "Emanuele",
+           family = "Giorgi",
+           role = c("aut", "cre"),
+           email = "e.giorgi@lancaster.ac.uk",
+           comment = c(ORCID = "0000-0003-0640-181X")),
+    person(given = "Claudio",
+           family = "Fronterre",
+           role = "ctb",
+           email = "c.fronterr@lancaster.ac.uk",           
+           comment = c(ORCID = "0000-0001-6723-9727")))
+Description: Provides functions for geo-statistical analysis of both continuous and count data using maximum likelihood methods. The models implemented in the package use stationary Gaussian processes with Matern correlation function to carry out spatial prediction in a geographical area of interest. The underpinning theory of the methods implemented in the package are found in Diggle and Giorgi (2019, ISBN: 978-1-138-06102-7).
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
 RoxygenNote: 7.3.1
 URL: https://claudiofronterre.github.io/RiskMap/
-Imports: sf, stats, methods, ggplot2, Matrix, maxLik
+Imports: sf, stats, methods, ggplot2, Matrix, maxLik, terra, xtable
 Depends:
     R (>= 2.10)

@@ -2,19 +2,45 @@
 % Please edit documentation in R/auxiliary.R
 \name{summary.RiskMap}
 \alias{summary.RiskMap}
-\title{Summarizing model fits}
+\title{Summarize Model Fits}
 \usage{
-\method{summary}{RiskMap}(object, conf_level = 0.95)
+\method{summary}{RiskMap}(object, ..., conf_level = 0.95)
 }
 \arguments{
-\item{object}{an object of class "RiskMap" obatained as result of a call to \code{\link{glgpm}}}
+\item{object}{An object of class "RiskMap" obtained as a result of a call to \code{\link{glgpm}}.}
+
+\item{...}{other parameters.}
+
+\item{conf_level}{The confidence level for the intervals (default is 0.95).}
 }
 \value{
-A list with the following components
+A list containing:
+\item{reg_coef}{A matrix with the estimates, standard errors, z-values, p-values, and confidence intervals for the regression coefficients.}
+\item{me}{A matrix with the estimates and confidence intervals for the measurement error variance, if applicable.}
+\item{sp}{A matrix with the estimates and confidence intervals for the spatial process parameters.}
+\item{tau2}{The fixed nugget variance, if applicable.}
+\item{ranef}{A matrix with the estimates and confidence intervals for the random effects variances, if applicable.}
+\item{conf_level}{The confidence level used for the intervals.}
+\item{family}{The family of the model (e.g., "gaussian").}
+\item{kappa}{The kappa parameter of the model.}
+\item{log.lik}{The log-likelihood of the model fit.}
+\item{cov_offset_used}{A logical indicating if a covariance offset was used.}
+\item{aic}{The Akaike Information Criterion (AIC) for the model, if applicable.}
 }
 \description{
-\code{summary} method for the class "RiskMap" that computes the standard errors and p-values of likelihood-based model fits.
+Provides a \code{summary} method for the "RiskMap" class that computes the standard errors and p-values for likelihood-based model fits.
+}
+\details{
+This function computes the standard errors and p-values for the parameters of a "RiskMap" model, adjusting for the covariance structure if needed.
+}
+\note{
+Handles both Gaussian and non-Gaussian families, and accounts for fixed and random effects in the model.
+}
+\seealso{
+\code{\link{glgpm}}, \code{\link{coef.RiskMap}}
 }
 \author{
 Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}
+
+Claudio Fronterre \email{c.fronterr@lancaster.ac.uk}
 }

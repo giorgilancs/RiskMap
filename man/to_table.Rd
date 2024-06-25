@@ -2,22 +2,33 @@
 % Please edit documentation in R/auxiliary.R
 \name{to_table}
 \alias{to_table}
-\title{Create table in Latex}
+\title{Create LaTeX Table from Model Fit}
 \usage{
 to_table(object, ...)
 }
 \arguments{
-\item{object}{an object of class "RiskMap" obatained as result of a call to \code{\link{glgpm}}}
+\item{object}{An object of class "RiskMap" obtained as a result of a call to \code{\link{glgpm}}.}
 
-\item{...}{additional arguments to be passed to \code{\link{xtable}}.}
+\item{...}{Additional arguments to be passed to \code{\link[xtable]{xtable}}.}
 }
 \value{
-For most \code{xtable} methods, an object of class "xtable" which inherits the \code{data.frame}
-class and contains several additional attributes specifying the table formatting options
+An object of class "xtable" which inherits the \code{data.frame} class and contains several additional attributes specifying the table formatting options.
 }
 \description{
-Convert a model fit into an \code{xtable} object,
-which can then be printed as a LaTeX or HTML table.
+Converts a "RiskMap" model fit into an \code{xtable} object, which can then be printed as a LaTeX or HTML table.
+}
+\details{
+This function takes a fitted "RiskMap" model and converts it into an \code{xtable} object. The resulting table includes:
+\itemize{
+  \item Regression coefficients with their estimates, confidence intervals, and p-values.
+  \item Spatial process parameters.
+  \item Random effects variances.
+  \item Measurement error variance, if applicable.
+}
+The \code{xtable} object can be customized further using additional arguments and then printed as a LaTeX or HTML table.
+}
+\seealso{
+\code{\link{glgpm}}, \code{\link[xtable]{xtable}}
 }
 \author{
 Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}

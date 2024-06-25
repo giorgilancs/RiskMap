@@ -2,10 +2,45 @@
 % Please edit documentation in R/handling_spat_data.R
 \name{create_grid}
 \alias{create_grid}
-\title{Create grid of points within shape file}
+\title{Create Grid of Points Within Shapefile}
 \usage{
 create_grid(shp, spat_res, grid_crs = NULL)
 }
+\arguments{
+\item{shp}{An object of class 'sf' representing the shapefile within which the grid of points will be created.}
+
+\item{spat_res}{Numeric value specifying the spatial resolution in kilometers for the grid.}
+
+\item{grid_crs}{Coordinate reference system for the grid. If NULL, the CRS of 'shp' is used. The shapefile 'shp' will be transformed to this CRS if specified.}
+}
+\value{
+An 'sf' object containing the generated grid points within the shapefile.
+}
 \description{
-Create grid of points within shape file
+Generates a grid of points within a given shapefile. The grid points are created based on a specified spatial resolution.
+}
+\details{
+This function creates a grid of points within the boundaries of the provided shapefile ('shp'). The grid points are generated using the specified spatial resolution ('spat_res'). If a coordinate reference system ('grid_crs') is provided, the shapefile is transformed to this CRS before creating the grid.
+}
+\examples{
+library(sf)
+
+# Example shapefile data
+nc <- st_read(system.file("shape/nc.shp", package="sf"))
+
+# Create grid with 10 km spatial resolution
+grid <- create_grid(nc, spat_res = 10)
+
+# Plot the grid
+plot(st_geometry(nc))
+plot(grid, add = TRUE, col = 'red')
+
+}
+\seealso{
+\code{\link[sf]{st_make_grid}}, \code{\link[sf]{st_intersects}}, \code{\link[sf]{st_transform}}, \code{\link[sf]{st_crs}}
+}
+\author{
+Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}
+
+Claudio Fronterre \email{c.fronterr@lancaster.ac.uk}
 }

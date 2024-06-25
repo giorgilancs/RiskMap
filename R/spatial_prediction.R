@@ -1,6 +1,31 @@
+##' Prediction of the random effects components and covariates effects over a spatial grid using a fitted generalized linear Gaussian process model
+##'
+##' This function computes predictions over a spatial grid using a fitted model
+##' obtained from the \code{\link{glgpm}} function. It provides point predictions and uncertainty
+##' estimates for the specified locations for each component of the model separately: the spatial random effects;
+##' the unstructured random effects (if included); and the covariates effects.
+##'
+##' @param object A RiskMap object obtained from the `glgpm` function.
+##' @param grid_pred An object of class 'sfc', representing the spatial grid over which predictions
+##'                 are to be made. Must be in the same coordinate reference system (CRS) as the
+##'                 object passed to 'object'.
+##' @param predictors Optional. A data frame containing predictor variables used for prediction.
+##' @param re_predictors Optional. A data frame containing predictors for unstructured random effects,
+##'                      if applicable.
+##' @param pred_cov_offset Optional. A numeric vector specifying covariate offsets at prediction locations.
+##' @param control_sim Control parameters for MCMC sampling. Must be an object of class "mcmc.RiskMap" as returned by \code{\link{set_control_sim}}.
+##' @param type Type of prediction. "marginal" for marginal predictions, "joint" for joint predictions.
+##' @param messages Logical. If TRUE, display progress messages. Default is TRUE.
+##'
+##' @return An object of class 'RiskMap.pred.re' containing predicted values, uncertainty estimates,
+##'         and additional information.
+##'
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @importFrom Matrix Matrix forceSymmetric
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @importFrom Matrix solve
 ##' @export
+##'
+
 pred_over_grid <- function(object,
                    grid_pred,
                    predictors = NULL,
@@ -20,6 +45,15 @@ pred_over_grid <- function(object,
     stop("The object passed to 'grid_pred' must be an object
          of class 'sfc'")
   }
+
+  if(!inherits(control_sim,
+                 what = "mcmc.RiskMap", which = FALSE)) {
+      stop ("the argument passed to 'control_sim' must be an output
+                                                  from the function set_control_sim; see ?set_control_sim
+                                                  for more details")
+
+  }
+
   grid_pred <- st_transform(grid_pred,crs = object$crs)
 
   grp <- st_coordinates(grid_pred)
@@ -54,15 +88,60 @@ pred_over_grid <- function(object,
   inter_lt_f$pf <- update(inter_lt_f$pf, NULL ~.)
 
   if(p==1) {
-    intercept_only <- prod(object$D[,1]==1)
+    intercept_only <- prod(object$D[,1]==1)==1
   } else {
     intercept_only <- FALSE
+  }
+
+  n_re <- length(object$re)
+  if(n_re > 0 & type=="marginal" & !is.null(re_predictors)) {
+    stop("Predictions for the unstructured random effects will not be perfomed if type = 'marginal';
+            if you wish to also include the predictions for the unstructured random
+            effects then set type = 'joint'")
   }
 
   if(!is.null(predictors)) {
 
     if(!is.data.frame(predictors)) stop("'predictors' must be an object of class 'data.frame'")
     if(nrow(predictors)!=n_pred) stop("the values provided for 'predictors' do not match the prediction grid passed to 'grid_pred'")
+
+    if(any(is.na(predictors))) {
+      warning("There are missing values in 'predictors'; these values have been removed
+              alongside the corresponding prediction locations")
+      if(any(is.na(re_predictors))) {
+        warning("There are missing values in 're_predictors'; these values have been removed
+              alongside the corresponding prediction locations")
+      }
+      if(!is.null(re_predictors)) {
+        if(nrow(re_predictors)!=n_pred) stop("the values provided for 're_predictors' do not match the prediction grid passed to 'grid_pred'")
+
+        comb_pred <- data.frame(predictors,
+                                re_predictors)
+        ind_c <- complete.cases(comb_pred)
+        predictors_aux <- data.frame(na.omit(comb_pred)[,1:ncol(predictors)])
+        colnames(predictors_aux) <- colnames(predictors)
+        predictors <- predictors_aux
+
+        re_predictors_aux <- data.frame(na.omit(comb_pred)[,(ncol(predictors)+1):
+                                                            (ncol(predictors)+
+                                                             ncol(re_predictors))])
+        colnames(re_predictors_aux) <- colnames(re_predictors_aux)
+        re_predictors <- re_predictors_aux
+      } else {
+        comb_pred <- predictors
+        ind_c <- complete.cases(comb_pred)
+        predictors_aux <- data.frame(na.omit(comb_pred))
+        colnames(predictors_aux) <- colnames(predictors)
+        predictors <- predictors_aux
+      }
+      grid_pred_aux <- st_coordinates(grid_pred)[ind_c,]
+      grid_pred <- st_as_sf(data.frame(grid_pred_aux),
+                            coords = c("X","Y"),
+                            crs = st_crs(grid_pred)$input)
+      grp <- st_coordinates(grid_pred)
+      n_pred <- nrow(grp)
+
+    }
 
     mf_pred <- model.frame(inter_lt_f$pf,data=predictors, na.action = na.fail)
     D_pred <- as.matrix(model.matrix(attr(mf_pred,"terms"),data=predictors))
@@ -75,12 +154,30 @@ pred_over_grid <- function(object,
     mu_pred <- 0
   }
 
-  n_re <- length(object$re)
+  if(n_re>0) {
 
-  if(!is.null(object$re)) {
+    ID_g <- as.matrix(cbind(object$ID_coords, object$ID_re))
+    re_unique <- object$re
+    n_dim_re_tot <- sapply(1:(n_re+1), function(i) length(unique(ID_g[,i])))
     if(!is.null(re_predictors)) {
+      if(any(is.na(re_predictors))) {
+        warning("There are missing values in 're_predictors'; these values have been removed
+              alongside the corresponding prediction locations")
+        comb_pred <- data.frame(re_predictors)
+        ind_c <- complete.cases(comb_pred)
+        re_predictors_aux <- data.frame(na.omit(comb_pred))
+        colnames(re_predictors_aux) <- colnames(re_predictors_aux)
+        re_predictors <- re_predictors_aux
+        grid_pred_aux <- st_coordinates(grid_pred)[ind_c,]
+        grid_pred <- st_as_sf(data.frame(grid_pred_aux),
+                              coords = c("X","Y"),
+                              crs = st_crs(grid_pred)$input)
+        grp <- st_coordinates(grid_pred)
+        n_pred <- nrow(grp)
+      }
       if(!is.data.frame(re_predictors)) stop("'re_predictors' must be an object of class 'data.frame'")
-      if(nrow(re_predictors)!=n_pred) stop("the values provided for 'predictors' do not match the prediction grid passed to 'grid_pred'")
+
+      if(nrow(re_predictors)!=n_pred) stop("the values provided for 're_predictors' do not match the prediction grid passed to 'grid_pred'")
       if(ncol(re_predictors)!=n_re) stop("the number of unstructured random effects provided in 're_predictors' does not match that of the fitted model")
 
       D_re_pred <- list()
@@ -88,9 +185,9 @@ pred_over_grid <- function(object,
       for(i in 1:n_re) {
         re_val_i <- re_predictors[,i]
         D_re_pred[[i]] <- matrix(0,nrow = n_pred, ncol = n_dim_re[i])
-        for(j in 1:n_pred) {
-          ind_i <- which(as.character(re_val_i[j])==object$re[[i]])
-          D_re_pred[[i]][j, ind_i] <- 1
+        for(j in 1:length(object$re[[i]])) {
+          ind_j <- which(re_val_i==object$re[[i]][j])
+          D_re_pred[[i]][ind_j, j] <- 1
         }
       }
     } else {
@@ -107,9 +204,15 @@ pred_over_grid <- function(object,
   out$par_hat <- object$par_hat
 
   if(object$scale_to_km) grp <- grp/1000
-  U_pred <- t(sapply(1:n_pred,
-                     function(i) sqrt((object$coords[object$ID_coords,1]-grp[i,1])^2+
+  if(object$family=="gaussian") {
+    U_pred <- t(sapply(1:n_pred,
+                       function(i) sqrt((object$coords[object$ID_coords,1]-grp[i,1])^2+
                                         (object$coords[object$ID_coords,2]-grp[i,2])^2)))
+  } else {
+    U_pred <- t(sapply(1:n_pred,
+                       function(i) sqrt((object$coords[,1]-grp[i,1])^2+
+                                          (object$coords[,2]-grp[i,2])^2)))
+  }
   U <- dist(object$coords)
   C <- par_hat$sigma2*matern_cor(U_pred, phi = par_hat$phi,
                                  kappa = object$kappa)
@@ -121,7 +224,20 @@ pred_over_grid <- function(object,
     n_samples <- (control_sim$n_sim-control_sim$burnin)/control_sim$thin
   }
 
+  R <- matern_cor(U,phi = par_hat$phi, kappa=object$kappa,return_sym_matrix = TRUE)
+  diff.y <- object$y-mu
+  if(!is.null(object$fix_tau2)) {
+    nu2 <- object$fix_tau2/par_hat$sigma2
+  } else {
+    nu2 <- par_hat$tau2/par_hat$sigma2
+  }
+  if(nu2==0) nu2 <- 10e-10
+
+  diag(R) <- diag(R)+nu2
+
   if(object$family!="gaussian") {
+    Sigma <- par_hat$sigma2*R
+    Sigma_inv <- solve(Sigma)
     A <- C%*%Sigma_inv
 
     simulation <-
@@ -142,7 +258,6 @@ pred_over_grid <- function(object,
       Sigma_pred <-  par_hat$sigma2*matern_cor(U_pred_o, phi = par_hat$phi,
                                                kappa = object$kappa,
                                                return_sym_matrix = TRUE)
-
       Sigma_cond <- Sigma_pred - A%*%t(C)
       Sigma_cond_sroot <- t(chol(Sigma_cond))
       out$S_samples <- sapply(1:n_samples,
@@ -151,14 +266,6 @@ pred_over_grid <- function(object,
                                 Sigma_cond_sroot%*%rnorm(n_pred))
     }
   } else {
-    R <- matern_cor(U,phi = par_hat$phi, kappa=object$kappa,return_sym_matrix = TRUE)
-    diff.y <- object$y-mu
-    if(!is.null(object$fix_tau2)) {
-      nu2 <- object$fix_tau2/par_hat$sigma2
-    } else {
-      nu2 <- par_hat$tau2/par_hat$sigma2
-    }
-    diag(R) <- diag(R)+nu2
 
     if(!is.null(object$fix_var_me) && object$fix_var_me>0 ||
        is.null(object$fix_var_me)) {
@@ -167,22 +274,21 @@ pred_over_grid <- function(object,
 
       ID_g <- as.matrix(cbind(object$ID_coords, object$ID_re))
 
-      n_dim_re <- sapply(1:(n_re+1), function(i) length(unique(ID_g[,i])))
-      C_g <- matrix(0, nrow = m, ncol = sum(n_dim_re))
+      n_dim_re_tot <- sapply(1:(n_re+1), function(i) length(unique(ID_g[,i])))
+      C_g <- matrix(0, nrow = m, ncol = sum(n_dim_re_tot))
 
       for(i in 1:m) {
         ind_s_i <- which(s_unique==ID_g[i,1])
-        C_g[i,1:n_dim_re[1]][ind_s_i] <- 1
+        C_g[i,1:n_dim_re_tot[1]][ind_s_i] <- 1
       }
 
-      re_unique <- object$re
       if(n_re>0) {
         for(j in 1:n_re) {
-          select_col <- sum(n_dim_re[1:j])
+          select_col <- sum(n_dim_re_tot[1:j])
 
           for(i in 1:m) {
             ind_re_j_i <- which(re_unique[[j]]==ID_g[i,j+1])
-            C_g[i,select_col+1:n_dim_re[j+1]][ind_re_j_i] <- 1
+            C_g[i,select_col+1:n_dim_re_tot[j+1]][ind_re_j_i] <- 1
           }
         }
       }
@@ -191,19 +297,19 @@ pred_over_grid <- function(object,
       C_g_m <- forceSymmetric(C_g_m)
 
 
-      Sigma_g <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
-      Sigma_g_inv <- matrix(0, nrow = sum(n_dim_re), ncol = sum(n_dim_re))
-      Sigma_g[1:n_dim_re[1], 1:n_dim_re[1]] <- par_hat$sigma2*R
-      Sigma_g_inv[1:n_dim_re[1], 1:n_dim_re[1]] <-
+      Sigma_g <- matrix(0, nrow = sum(n_dim_re_tot), ncol = sum(n_dim_re_tot))
+      Sigma_g_inv <- matrix(0, nrow = sum(n_dim_re_tot), ncol = sum(n_dim_re_tot))
+      Sigma_g[1:n_dim_re_tot[1], 1:n_dim_re_tot[1]] <- par_hat$sigma2*R
+      Sigma_g_inv[1:n_dim_re_tot[1], 1:n_dim_re_tot[1]] <-
         solve(R)/par_hat$sigma2
       if(n_re > 0) {
         for(j in 1:n_re) {
-          select_col <- sum(n_dim_re[1:j])
+          select_col <- sum(n_dim_re_tot[1:j])
 
-          diag(Sigma_g[select_col+1:n_dim_re[j+1], select_col+1:n_dim_re[j+1]]) <-
+          diag(Sigma_g[select_col+1:n_dim_re_tot[j+1], select_col+1:n_dim_re_tot[j+1]]) <-
             par_hat$sigma2_re[j]
 
-          diag(Sigma_g_inv[select_col+1:n_dim_re[j+1], select_col+1:n_dim_re[j+1]]) <-
+          diag(Sigma_g_inv[select_col+1:n_dim_re_tot[j+1], select_col+1:n_dim_re_tot[j+1]]) <-
             1/par_hat$sigma2_re[j]
 
         }
@@ -244,27 +350,66 @@ pred_over_grid <- function(object,
     }
   }
 
-  if(n_re>0) {
+  if(n_re>0 & !is.null(re_predictors)) {
     out$re <- list()
     out$re$D_pred <- D_re_pred
+    out$re$samples <- list()
     re_names <- colnames(object$ID_re)
-    for(i in 1:n_re) {
-      C_re <- matrix(0, nrow=n_pred,ncol=n_dim_re[1+i])
-      for(j in 1:n_dim_re[1+i]) {
-        C_re <- matrix(0, ncol= m)
-        ind_ij <- which(object$ID_re[[i]]==re_unique[[i]][j])
-        C_re[,ind_ij] <- par_hat$sigma2_re[i]
-        A_re <- C_re%*%B
+    if(object$family=="gaussian") {
+      Sigma_cond_inv <- solve(Sigma_cond)
+      C_Z <- C_g[,-(1:n_dim_re_tot[1])]
+      add <- 0
+      for(i in 1:length(n_dim_re_tot[-1])) {
+        C_Z[,add+1:n_dim_re_tot[i+1]] <- par_hat$sigma2_re[i]*C_Z[,add+1:n_dim_re_tot[i+1]]
+        add <- n_dim_re_tot[i+1]
+      }
 
-        re_mu_cond <- as.numeric(A_re%*%diff.y)
-        re_sd_cond <- as.numeric(sqrt(par_hat$sigma2_re[i]-A_re%*%t(C_re)))
+      A_Z <- Matrix::t(C_Z)%*%B%*%t(C)%*%Sigma_cond_inv
 
-        out$re[[paste(re_names[i])]][[paste(object$re[[i]][j])]] <-
-          list(mu_cond = re_mu_cond, sd_cond = re_sd_cond)
+      Sigma_Z_cond <- diag(rep(par_hat$sigma2_re,n_dim_re_tot[-1]))-
+        Matrix::t(C_Z)%*%B%*%C_Z-
+        A_Z%*%C%*%Matrix::t(B)%*%C_Z
+      Sigma_Z_cond_sroot <- t(chol(Sigma_Z_cond))
+
+      mu_Z_cond <- sapply(1:n_samples, function(i) as.matrix(A_Z%*%(out$S_samples[,i]-mu_cond_S)))
+      add <- 0
+      for(i in 1:n_re) {
+        for(j in 1:n_dim_re_tot[1+i]) {
+          add <- add + 1
+          C_re_ij <- matrix(0, ncol= m)
+          ind_ij <- which(object$ID_re[[i]]==re_unique[[i]][j])
+          C_re_ij[,ind_ij] <- par_hat$sigma2_re[i]
+          A_re <- C_re_ij%*%B
+
+          mu_Z_cond[add,] <- as.numeric(A_re%*%diff.y)+mu_Z_cond[add,]
+        }
+      }
+      re_samples <- sapply(1:n_samples,
+                           function(i)
+                             as.numeric(
+                               mu_Z_cond[,i]+
+                                 Sigma_Z_cond_sroot%*%rnorm(sum(n_dim_re_tot[-1]))))
+    } else {
+      re_samples <- matrix(0, nrow = sum(n_dim_re_tot[-1]), ncol = n_samples)
+      add <- 0
+      for(i in 1:n_re) {
+        re_samples[1:n_dim_re_tot[i+1],] <- t(simulation$samples[[i+1]])
+        add <- add+n_dim_re_tot[i+1]
       }
     }
-  }
 
+    add <- 0
+    for(i in 1:n_re) {
+      for(j in 1:n_dim_re_tot[1+i]) {
+        add <- add + 1
+        out$re$samples[[paste(re_names[[i]])]][[paste(re_unique[[i]][[j]])]] <-
+          re_samples[add,]
+      }
+    }
+
+  } else {
+    out$re <- list(D_pred = NULL, samples = NULL)
+  }
   out$inter_f <- inter_f
   out$family <- object$family
   out$par_hat <- par_hat
@@ -274,9 +419,29 @@ pred_over_grid <- function(object,
   return(out)
 }
 
+##' Predictive Target Over a Regular Spatial Grid
+##'
+##' Computes predictions over a regular spatial grid using outputs from the
+##' \code{\link{pred_over_grid}} function.
+##' This function allows for incorporating covariates, offsets, and optional
+##' unstructured random effects into the predictive target.
+##'
+##' @param object Output from `pred_over_grid`, a RiskMap.pred.re object.
+##' @param include_covariates Logical. Include covariates in the predictive target.
+##' @param include_nugget Logical. Include the nugget effect in the predictive target.
+##' @param include_cov_offset Logical. Include the covariate offset in the predictive target.
+##' @param include_re Logical. Include unstructured random effects in the predictive target.
+##' @param f_target Optional. List of functions to apply on the linear predictor samples.
+##' @param pd_summary Optional. List of summary functions to apply on the predicted values.
+##'
+##' @return An object of class 'RiskMap_pred_target_grid' containing predicted values
+##'         and summaries over the regular spatial grid.
+##' @seealso \code{\link{pred_over_grid}}
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @importFrom Matrix Matrix forceSymmetric
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @importFrom Matrix solve
 ##' @export
+##'
 pred_target_grid <- function(object,
                         include_covariates = TRUE,
                         include_nugget = FALSE,
@@ -309,7 +474,8 @@ pred_target_grid <- function(object,
   n_samples <- ncol(object$S_samples)
   n_pred <- nrow(object$S_samples)
 
-  n_re <- length(object$re)-1
+  n_re <- length(object$re$samples)
+  re_names <- names(object$re$samples)
 
   out <- list()
   if(length(object$mu_pred)==1 && object$mu_pred==0 &&
@@ -360,22 +526,24 @@ pred_target_grid <- function(object,
                              object$S_samples[,i])
 
   if(include_re) {
+    n_dim_re <- sapply(1:n_re, function(i) length(object$re$samples[[i]]))
+
     for(i in 1:n_re) {
-      dim_re_i <- ncol(object$re$D_pred[[i]])
-      re_i_samples <- matrix(0, nrow=n_pred, ncol=n_samples)
-      for(j in 1:dim_re_i) {
-        if(object$family=="gaussian") {
-          samples_ij <- rnorm(n_samples,
-                              mean = object$re[[i+1]][[j]]$mu_cond,
-                              sd = object$re[[i+1]][[j]]$sd_cond)
-          #object$re$D_pred[[i]][,j]
+      for(j in 1:n_dim_re[i]) {
+        for(h in 1:n_samples) {
+          out$lp_samples[,h] <- out$lp_samples[,h] +
+          object$re$D_pred[[i]][,j]*object$re$samples[[i]][[j]][h]
         }
       }
     }
   }
 
   names_f <- names(f_target)
+  if(is.null(names_f)) names_f <- paste("f_target_",1:length(f_target), sep = "")
+
   names_s <- names(pd_summary)
+  if(is.null(pd_summary)) names_s <- paste("pd_summary_",1:length(f_target), sep = "")
+
   out$target <- list()
 
   for(i in 1:n_f) {
@@ -390,34 +558,88 @@ pred_target_grid <- function(object,
   out$grid_pred <- object$grid_pred
   out$f_target <- names(f_target)
   out$pd_summary <- names(pd_summary)
-  class(out) <- "RiskMap.pred.target.grid"
+  class(out) <- "RiskMap_pred_target_grid"
   return(out)
 }
 
-##' @importFrom terra rast plot as.data.frame
-##' @method plot RiskMap.pred.target.grid
+##' Plot Method for RiskMap_pred_target_grid Objects
+##'
+##' Generates a plot of the predicted values or summaries over the regular spatial grid
+##' from an object of class 'RiskMap_pred_target_grid'.
+##'
+##' @param x An object of class 'RiskMap_pred_target_grid'.
+##' @param which_target Character string specifying which target prediction to plot.
+##' @param which_summary Character string specifying which summary statistic to plot (e.g., "mean", "sd").
+##' @param ... Additional arguments passed to the \code{\link[terra]{plot}} function of the \code{terra} package.
+##' @return A \code{ggplot} object representing the specified prediction target or summary statistic over the spatial grid.
+##' @details
+##' This function requires the 'terra' package for spatial data manipulation and plotting.
+##' It plots the values or summaries over a regular spatial grid, allowing for visual examination of spatial patterns.
+##'
+##' @seealso \code{\link{pred_target_grid}}
+##'
+##' @importFrom terra as.data.frame rast plot
+##' @method plot RiskMap_pred_target_grid
 ##' @export
 ##'
-plot.RiskMap.pred.target.grid <- function(object,
-                                     which_target,
-                                     which_summary, ...) {
+##'
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+plot.RiskMap_pred_target_grid <- function(x, which_target = "linear_target", which_summary = "mean", ...) {
   t_data.frame <-
-    terra::as.data.frame(cbind(st_coordinates(object$grid_pred),
-                               object$target[[which_target]][[which_summary]]),
-                         xy= TRUE)
-  raster_out <- terra::rast(t_data.frame, crs = st_crs(object$grid_pred)$input)
+    terra::as.data.frame(cbind(st_coordinates(x$grid_pred),
+                               x$target[[which_target]][[which_summary]]),
+                         xy = TRUE)
+  raster_out <- terra::rast(t_data.frame, crs = st_crs(x$grid_pred)$input)
 
-  terra::plot(raster_out)
+  terra::plot(raster_out, ...)
 }
 
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+
+##' Predictive Target over a Shapefile
+##'
+##' Computes predictions over a shapefile using outputs from the
+##' \code{\link{pred_over_grid}} function.
+##' This function allows for incorporating covariates, offsets, and optional
+##' unstructured random effects into the predictive target.
+##'
+##' @param object Output from `pred_over_grid`, a RiskMap.pred.re object.
+##' @param shp Spatial dataset (sf or data.frame) representing the shapefile over which predictions are computed.
+##' @param shp_target Function defining the aggregation method for shapefile targets (default is mean).
+##' @param weights Optional numeric vector of weights for spatial predictions.
+##' @param standardize_weights Logical indicating whether to standardize weights (default is FALSE).
+##' @param col_names Column name or index in 'shp' containing region names.
+##' @param include_covariates Logical indicating whether to include covariates in predictions (default is TRUE).
+##' @param include_nugget Logical indicating whether to include the nugget effect (default is FALSE).
+##' @param include_cov_offset Logical indicating whether to include covariate offset in predictions (default is FALSE).
+##' @param include_re Logical indicating whether to include random effects in predictions (default is FALSE).
+##' @param f_target List of target functions to apply to the linear predictor samples.
+##' @param pd_summary List of summary functions (e.g., mean, sd) to summarize target samples.
+##'
+##' @importFrom terra rast as.data.frame
 ##' @export
-pred_target_shp <- function(object, shp, shp_target,
+##' @details
+##' This function computes predictive targets or summaries over a spatial shapefile
+##' using outputs from 'pred_S'. It requires the 'terra' package for spatial data
+##' manipulation and should be used with 'sf' or 'data.frame' objects representing
+##' the shapefile.
+##'
+##' @return An object of class 'RiskMap_pred_target_shp' containing computed targets,
+##' summaries, and associated spatial data.
+##'
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##'
+##' @seealso
+##' \code{\link{pred_target_grid}}
+##'
+pred_target_shp <- function(object, shp, shp_target=mean,
                             weights = NULL,standardize_weights = FALSE,
                             col_names=NULL,
                             include_covariates = TRUE,
                             include_nugget = FALSE,
                             include_cov_offset = FALSE,
+                            include_re = FALSE,
                             f_target = NULL,
                             pd_summary = NULL) {
   if(!inherits(object,
@@ -436,12 +658,16 @@ pred_target_shp <- function(object, shp, shp_target,
          the function 'pred_S'")
   }
 
-  if(!inherits(shp_target,
-               what = c("function"), which = FALSE)) {
-    stop("The object passed to 'shp_function' must be a function
-         that takes as an input a vector and returns a single numeric value")
-  }
   n_pred <- nrow(object$S_samples)
+
+  n_re <- length(object$re$samples)
+  re_names <- names(object$re$samples)
+
+  if(n_re==0 &&
+     include_re) {
+    stop("The categories of the randome effects variables have not been provided;
+         re-run pred_over_grid and provide the covariates through the argument 're_predictors'")
+  }
 
   if(!is.null(weights)) {
     if(!inherits(weights,
@@ -514,6 +740,19 @@ pred_target_shp <- function(object, shp, shp_target,
                            function(i)
                              mu_target + cov_offset +
                              object$S_samples[,i])
+  if(include_re) {
+    n_dim_re <- sapply(1:n_re, function(i) length(object$re$samples[[i]]))
+
+    for(i in 1:n_re) {
+      for(j in 1:n_dim_re[i]) {
+        for(h in 1:n_samples) {
+          out$lp_samples[,h] <- out$lp_samples[,h] +
+            object$re$D_pred[[i]][,j]*object$re$samples[[i]][[j]][h]
+        }
+      }
+    }
+  }
+
   names_f <- names(f_target)
   names_s <- names(pd_summary)
   out$target <- list()
@@ -535,7 +774,7 @@ pred_target_shp <- function(object, shp, shp_target,
   inter <- st_intersects(shp, object$grid_pred)
 
   for(h in 1:n_reg) {
-    cat("Computing predictive target for:",shp[[col_names]][h])
+    message("Computing predictive target for:",shp[[col_names]][h])
     if(length(inter[[h]])==0) {
       stop(paste("No points on the grid fall within", shp[[col_names]][h]))
     }
@@ -556,7 +795,7 @@ pred_target_shp <- function(object, shp, shp_target,
           pd_summary[[j]](target_samples_i)
       }
     }
-    cat(" \n")
+    message(" \n")
   }
 
   for(i in 1:n_f) {
@@ -574,22 +813,39 @@ pred_target_shp <- function(object, shp, shp_target,
   out$f_target <- names(f_target)
   out$pd_summary <- names(pd_summary)
   out$grid_pred <- object$grid_pred
-  class(out) <- "RiskMap.pred.target.shp"
+  class(out) <- "RiskMap_pred_target_shp"
   return(out)
 }
 
-
-##' @importFrom ggplot2 ggplot geom_sf aes scale_fill_distiller
-##' @method plot RiskMap.pred.target.shp
-##' @export
+##' Plot Method for RiskMap_pred_target_shp Objects
 ##'
-plot.RiskMap.pred.target.shp <- function(object,
-                                          which_target,
-                                          which_summary, ...) {
+##' Generates a plot of predictive target values or summaries over a shapefile.
+##'
+##' @param x An object of class 'RiskMap_pred_target_shp' containing computed targets,
+##' summaries, and associated spatial data.
+##' @param which_target Character indicating the target type to plot (e.g., "linear_target").
+##' @param which_summary Character indicating the summary type to plot (e.g., "mean", "sd").
+##' @param ... Additional arguments passed to 'scale_fill_distiller' in 'ggplot2'.
+##' @return A \code{ggplot} object showing the plot of the specified predictive target or summary.
+##' @details
+##' This function plots the predictive target values or summaries over a shapefile.
+##' It requires the 'ggplot2' package for plotting and 'sf' objects for spatial data.
+##'
+##' @seealso
+##' \code{\link{pred_target_shp}}, \code{\link[ggplot2]{ggplot}}, \code{\link[ggplot2]{geom_sf}},
+##' \code{\link[ggplot2]{aes}}, \code{\link[ggplot2]{scale_fill_distiller}}
+##'
+##' @importFrom ggplot2 ggplot geom_sf aes scale_fill_distiller
+##' @method plot RiskMap_pred_target_shp
+##' @export
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+plot.RiskMap_pred_target_shp <- function(x, which_target = "linear_target",
+                                         which_summary = "mean", ...) {
   col_shp_name <- paste(which_target,"_",which_summary,sep="")
 
-  out <- ggplot(object$shp) +
-    geom_sf(aes(fill = .data[[col_shp_name]])) +
+  out <- ggplot(x$shp) +
+    geom_sf(aes(fill = x$shp[[col_shp_name]])) +
     scale_fill_distiller(...)
   return(out)
 }

@@ -2,22 +2,25 @@
 % Please edit documentation in R/auxiliary.R
 \name{matern.hessian.phi}
 \alias{matern.hessian.phi}
-\title{Second derivative wtr phi}
+\title{Second Derivative with Respect to \eqn{\phi}}
 \usage{
 matern.hessian.phi(U, phi, kappa)
 }
 \arguments{
-\item{U}{a vector with values of the distances between pairs of data locations.}
+\item{U}{A vector of distances between pairs of data locations.}
 
-\item{phi}{value of the scale parameter \eqn{\phi}.}
+\item{phi}{The scale parameter \eqn{\phi}.}
 
-\item{kappa}{value of the smoothness parameter \eqn{\kappa}.}
+\item{kappa}{The smoothness parameter \eqn{\kappa}.}
 }
 \value{
-A matrix with the values of the second derivative of the Matern function
-with respect to \eqn{\phi} for the given distances
+A matrix with the values of the second derivative of the Matern function with respect to \eqn{\phi} for the given distances.
 }
 \description{
-Computes the second derivative of the Matern correlation
-function with respect to \eqn{\phi}.
+Computes the second derivative of the Matern correlation function with respect to \eqn{\phi}.
+}
+\author{
+Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}
+
+Claudio Fronterre \email{c.fronterr@lancaster.ac.uk}
 }
