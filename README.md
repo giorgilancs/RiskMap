@@ -6,6 +6,7 @@
 <!-- badges: start -->
 
 [![CRAN_Status_Badge](https://www.r-pkg.org/badges/version/RiskMap)](https://cran.r-project.org/package=RiskMap)
+[![R-CMD-check](https://github.com/claudiofronterre/RiskMap/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/claudiofronterre/RiskMap/actions/workflows/R-CMD-check.yaml)
 [![rstudio mirror
 downloads](https://cranlogs.r-pkg.org/badges/RiksMap)](https://github.com/r-hub/cranlogs.app)
 [![](https://cranlogs.r-pkg.org/badges/grand-total/RiskMap)](https://cran.r-project.org/package=stplanr)
