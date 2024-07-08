@@ -7,26 +7,26 @@
 \format{
 A data frame with 387 rows and 20 columns, containing the following variables:
 \itemize{
-  \item{cluster.number}{\code{int} Cluster number, identifying the survey cluster.}
-  \item{Lat}{\code{num} Latitude of the survey cluster.}
-  \item{Long}{\code{num} Longitude of the survey cluster.}
-  \item{MM}{\code{int} Month of the survey (in two-digit format).}
-  \item{YY}{\code{int} Year of the survey.}
-  \item{UpAge}{\code{num} Upper age limit of the surveyed individuals in years.}
-  \item{LoAge}{\code{num} Lower age limit of the surveyed individuals in years.}
-  \item{Ex}{\code{int} Number of individuals examined for malaria.}
-  \item{Pf}{\code{int} Number of individuals tested positive for Plasmodium falciparum (malaria parasite).}
-  \item{PfPR2.10}{\code{num} Plasmodium falciparum parasite rate in the population (aged 2-10 years).}
-  \item{Method}{\code{chr} Method used for malaria diagnosis (e.g., Rapid Diagnostic Test (RDT)).}
-  \item{EVI}{\code{num} Enhanced Vegetation Index, indicating vegetation density.}
-  \item{Temperature}{\code{num} Average temperature in degrees Celsius.}
-  \item{Precipitation}{\code{num} Total precipitation in millimeters.}
-  \item{Population}{\code{num} Population density in the area (in thousands).}
-  \item{ITN}{\code{num} Percentage of households with at least one insecticide-treated net (ITN).}
-  \item{NTL}{\code{num} Nighttime light intensity, indicating urbanization and infrastructure.}
-  \item{Urban.Rural}{\code{chr} Indicator of whether the area is urban ('U') or rural ('R').}
-  \item{utm_x}{\code{num} UTM (Universal Transverse Mercator) x-coordinate of the survey cluster.}
-  \item{utm_y}{\code{num} UTM (Universal Transverse Mercator) y-coordinate of the survey cluster.}
+  \item{cluster.number}{ Cluster number, identifying the survey cluster.}
+  \item{Lat}{ Latitude of the survey cluster.}
+  \item{Long}{ Longitude of the survey cluster.}
+  \item{MM}{ Month of the survey (in two-digit format).}
+  \item{YY}{ Year of the survey.}
+  \item{UpAge}{ Upper age limit of the surveyed individuals in years.}
+  \item{LoAge}{ Lower age limit of the surveyed individuals in years.}
+  \item{Ex}{ Number of individuals examined for malaria.}
+  \item{Pf}{ Number of individuals tested positive for Plasmodium falciparum (malaria parasite).}
+  \item{PfPR2.10}{ Plasmodium falciparum parasite rate in the population (aged 2-10 years).}
+  \item{Method}{ Method used for malaria diagnosis (e.g., Rapid Diagnostic Test (RDT)).}
+  \item{EVI}{ Enhanced Vegetation Index, indicating vegetation density.}
+  \item{Temperature}{ Average temperature in degrees Celsius.}
+  \item{Precipitation}{ Total precipitation in millimeters.}
+  \item{Population}{ Population density in the area (in thousands).}
+  \item{ITN}{ Percentage of households with at least one insecticide-treated net (ITN).}
+  \item{NTL}{ Nighttime light intensity, indicating urbanization and infrastructure.}
+  \item{Urban.Rural}{ Indicator of whether the area is urban ('U') or rural ('R').}
+  \item{utm_x}{ UTM (Universal Transverse Mercator) x-coordinate of the survey cluster.}
+  \item{utm_y}{ UTM (Universal Transverse Mercator) y-coordinate of the survey cluster.}
 }
 The CRS of the UTM coordinates is 32736.
 }

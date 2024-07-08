@@ -7,14 +7,14 @@
 \format{
 A data frame with 8740 observations of 8 variables:
 \itemize{
-  \item{population}{\code{num} Population density in the area (in thousands).}
-  \item{ITN}{\code{num} Percentage of households with at least one insecticide-treated net (ITN).}
-  \item{EVI}{\code{num} Enhanced Vegetation Index, indicating vegetation density.}
-  \item{Temperature}{\code{num} Average temperature in degrees Celsius.}
-  \item{NTL}{\code{num} Nighttime light intensity, indicating urbanization and infrastructure.}
-  \item{Precipitation}{\code{num} Total precipitation in millimeters.}
-  \item{utm_x}{\code{num} UTM (Universal Transverse Mercator) x-coordinate of the grid point.}
-  \item{utm_y}{\code{num} UTM (Universal Transverse Mercator) y-coordinate of the grid point.}
+  \item{population}{ Population density in the area (in thousands).}
+  \item{ITN}{ Percentage of households with at least one insecticide-treated net (ITN).}
+  \item{EVI}{ Enhanced Vegetation Index, indicating vegetation density.}
+  \item{Temperature}{ Average temperature in degrees Celsius.}
+  \item{NTL}{ Nighttime light intensity, indicating urbanization and infrastructure.}
+  \item{Precipitation}{ Total precipitation in millimeters.}
+  \item{utm_x}{ UTM (Universal Transverse Mercator) x-coordinate of the grid point.}
+  \item{utm_y}{ UTM (Universal Transverse Mercator) y-coordinate of the grid point.}
 }
 The CRS of the UTM coordinates is 32736.
 }
