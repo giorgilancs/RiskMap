@@ -16,41 +16,28 @@ knitr::opts_chunk$set(
 # RiskMap
 
 <!-- badges: start -->
+[![CRAN_Status_Badge](https://www.r-pkg.org/badges/version/RiskMap)](https://cran.r-project.org/package=RiskMap)
+[![R-CMD-check](https://github.com/claudiofronterre/RiskMap/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/claudiofronterre/RiskMap/actions/workflows/R-CMD-check.yaml)
+[![rstudio mirror downloads](https://cranlogs.r-pkg.org/badges/RiksMap)](https://github.com/r-hub/cranlogs.app)
+[![](https://cranlogs.r-pkg.org/badges/grand-total/RiskMap)](https://cran.r-project.org/package=RiskMap)
+[![lifecycle](https://img.shields.io/badge/lifecycle-maturing-blue.svg)](https://lifecycle.r-lib.org/articles/stages.html)
 <!-- badges: end -->
 
-The goal of `RiskMap` is to provide a set of functions for visualisation,
-processing and likelihood-based analysis of geostatistical data.
+## Overview
+
+`RiskMap` provides functions for geo-statistical analysis of both continuous and count data using maximum likelihood methods. The models implemented in the package use stationary Gaussian processes with Matern correlation function to carry out spatial prediction in a geographical area of interest. The underpinning theory of the methods implemented in the package are found in [Diggle and Giorgi (2019)](https://www.routledge.com/Model-based-Geostatistics-for-Global-Public-Health-Methods-and-Applications/Diggle-Giorgi/p/book/9781032093642).
 
 ## Installation
 
-You can install the development version of RiskMap from [GitHub](https://github.com/) with:
+To install the stable version, use:
 
-``` r
-# install.packages("devtools")
+```{r, eval=FALSE}
+install.packages("RiskMap")
+```
+
+The development version can be installed using **devtools**:
+
+```{r, eval=FALSE}
+# install.packages("devtools") # if not already installed
 devtools::install_github("claudiofronterre/RiskMap")
 ```
-
-## Example
-
-This is a basic example which shows you how to solve a common problem:
-
-```{r example}
-library(RiskMap)
-## basic example code
-```
-
-What is special about using `README.Rmd` instead of just `README.md`? You can include R chunks like so:
-
-```{r cars}
-summary(cars)
-```
-
-You'll still need to render `README.Rmd` regularly, to keep `README.md` up-to-date. `devtools::build_readme()` is handy for this. You could also use GitHub Actions to re-render `README.Rmd` every time you push. An example workflow can be found here: <https://github.com/r-lib/actions/tree/v1/examples>.
-
-You can also embed plots, for example:
-
-```{r pressure, echo = FALSE}
-plot(pressure)
-```
-
-In that case, don't forget to commit and push the resulting figure files, so they display on GitHub and CRAN.
