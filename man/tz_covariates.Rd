@@ -7,7 +7,7 @@
 \format{
 A data frame with 8740 observations of 8 variables:
 \itemize{
-  \item{population}{ Population density in the area (in thousands).}
+  \item{Population}{ Population density in the area (in thousands).}
   \item{ITN}{ Percentage of households with at least one insecticide-treated net (ITN).}
   \item{EVI}{ Enhanced Vegetation Index, indicating vegetation density.}
   \item{Temperature}{ Average temperature in degrees Celsius.}
