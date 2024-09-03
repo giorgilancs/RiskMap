@@ -2554,3 +2554,51 @@ function(y, D, coords, units_m, kappa,
   class(out) <- "RiskMap"
   return(out)
 }
+
+##' @importFrom sns ess
+check_mcmc <- function(object, check_mean = TRUE,
+                       component = NULL, ...) {
+  if(!inherits(object,
+               what = "RiskMap", which = FALSE) &
+     !inherits(object,
+               what = "RiskMap.pred.re", which = FALSE)) {
+    stop("'object' must be either of one of these objects:
+           a 'RiskMap' object obtained as an output from glgpm;
+           a 'RiskMap.pred.re' object obtained as an output from 'pred_over_grid'")
+  }
+
+  if(inherits(object,
+              what = "RiskMap", which = FALSE)) {
+    S_samples <- object$S_samples
+  } else if (inherits(object,
+                      what = "RiskMap.pred.re", which = FALSE)) {
+    S_samples <- t(object$S_samples)
+  }
+
+  if(check_mean & !is.null(component)) {
+    warning("if check_mean = TRUE, the value passed to 'component' is ignored;
+            set check_mean = FALSE when specifying a value for 'component'")
+  }
+  n_samples <- nrow(S_samples)
+  n_loc <- ncol(S_samples)
+  if(check_mean) {
+    S_chain <- apply(S_samples, 1, mean)
+  } else {
+    if(is.null(component)) stop("When check_mean = FALSE a component of the
+                                random effects vector must be specified through 'component'
+                                by providing a positive integer")
+    if(component < 0 | component > n_loc) stop("'component' must be a positive integer
+                                              between 1 and the number of locations in the data")
+    S_chain <- S_samples[,component]
+  }
+
+  par(mfrow = c(1,2))
+  plot(S_chain, type = "l",
+       ylab = "", xlab = "Iteration",
+       main = "Spatial random effect")
+
+  S_chain_ess <- round(ess(S_chain),3)
+  acf(S_chain, main = paste("Effective sample size:",
+                            S_chain_ess), ...)
+  par(mfrow = c(1,1))
+}
