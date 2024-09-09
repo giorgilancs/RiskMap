@@ -2555,7 +2555,44 @@ function(y, D, coords, units_m, kappa,
   return(out)
 }
 
+##' Check MCMC Convergence for Spatial Random Effects
+##'
+##' This function checks the Markov Chain Monte Carlo (MCMC) convergence of spatial random effects
+##' for either a \code{RiskMap} or \code{RiskMap.pred.re} object.
+##' It plots the trace plot and autocorrelation function (ACF) for the MCMC chain
+##' and calculates the effective sample size (ESS).
+##'
+##' @param object An object of class \code{RiskMap} or \code{RiskMap.pred.re}.
+##'  \code{RiskMap} is the output from \code{\link{glgpm}} function, and
+##'  \code{RiskMap.pred.re} is obtained from the \code{\link{pred_over_grid}} function.
+##' @param check_mean Logical. If \code{TRUE}, checks the MCMC chain for the mean of the spatial random effects.
+##'  If \code{FALSE}, checks the chain for a specific component of the random effects vector.
+##' @param component Integer. The index of the spatial random effects component to check when \code{check_mean = FALSE}.
+##'  Must be a positive integer corresponding to a location in the data. Ignored if \code{check_mean = TRUE}.
+##' @param ... Additional arguments passed to the \code{\link[stats]{acf}} function for customizing the ACF plot.
+##'
+##' @details
+##' The function first checks that the input object is either of class \code{RiskMap} or \code{RiskMap.pred.re}.
+##' Depending on the value of \code{check_mean}, it either calculates the mean of the spatial random effects
+##' across all locations for each iteration or uses the specified component.
+##' It then generates two plots:
+##' - A trace plot of the selected spatial random effect over iterations.
+##' - An autocorrelation plot (ACF) with the effective sample size (ESS) displayed in the title.
+##'
+##' The ESS is computed using the \code{\link[sns]{ess}} function, which provides a measure of the effective number
+##' of independent samples in the MCMC chain.
+##'
+##' If \code{check_mean = TRUE}, the \code{component} argument is ignored, and a warning is issued.
+##' To specify a particular component of the random effects vector, set \code{check_mean = FALSE} and provide
+##' a valid \code{component} value.
+##'
+##' @return
+##' No return value, called for side effects (plots and warnings).
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @importFrom sns ess
+##' @importFrom graphics par
+##' @importFrom stats acf
+##' @export
 check_mcmc <- function(object, check_mean = TRUE,
                        component = NULL, ...) {
   if(!inherits(object,
