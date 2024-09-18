@@ -773,36 +773,45 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   shp <- st_transform(shp, crs = st_crs(object$grid_pred)$input)
   inter <- st_intersects(shp, object$grid_pred)
 
+  no_comp <- NULL
   for(h in 1:n_reg) {
     message("Computing predictive target for:",shp[[col_names]][h])
     if(length(inter[[h]])==0) {
-      stop(paste("No points on the grid fall within", shp[[col_names]][h]))
-    }
-    ind_grid_h <- inter[[h]]
-    if(standardize_weights & !no_weights) {
-      weights_h <- weights[ind_grid_h]/sum(weights[ind_grid_h])
+      warning(paste("No points on the grid fall within", shp[[col_names]][h],
+                    "and no predictions are carried out for this area"))
+      no_comp <- c(no_comp, h)
     } else {
-      weights_h <- weights[ind_grid_h]
-    }
-    for(i in 1:n_f) {
+      ind_grid_h <- inter[[h]]
+      if(standardize_weights & !no_weights) {
+        weights_h <- weights[ind_grid_h]/sum(weights[ind_grid_h])
+      } else {
+        weights_h <- weights[ind_grid_h]
+      }
+      for(i in 1:n_f) {
 
-      target_samples_i <-
-        apply(f_target[[i]](out$lp_samples[ind_grid_h,]),
-              2, function(x) shp_target(weights_h*x))
-      out$target[[paste(names_reg[h])]][[paste(names_f[i])]] <- list()
-      for(j in 1:n_summaries) {
-        out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]] <-
-          pd_summary[[j]](target_samples_i)
+        target_samples_i <-
+          apply(as.matrix(f_target[[i]](out$lp_samples[ind_grid_h,])),
+                2, function(x) shp_target(weights_h*x))
+        out$target[[paste(names_reg[h])]][[paste(names_f[i])]] <- list()
+        for(j in 1:n_summaries) {
+          out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]] <-
+            pd_summary[[j]](target_samples_i)
+        }
       }
     }
     message(" \n")
   }
 
+  if(length(no_comp) > 0) {
+    ind_reg <- (1:n_reg)[-no_comp]
+  } else {
+    ind_reg <- 1:n_reg
+  }
   for(i in 1:n_f) {
     for(j in 1:n_summaries) {
       name_ij <- paste(names_f[i],"_",paste(names_s[j]),sep="")
       shp[[name_ij]] <- rep(NA, n_reg)
-      for(h in 1:n_reg) {
+      for(h in ind_reg) {
         which_reg <- which(shp[[col_names]]==names_reg[h])
         shp[which_reg,][[name_ij]] <-
           out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]]
@@ -849,3 +858,100 @@ plot.RiskMap_pred_target_shp <- function(x, which_target = "linear_target",
     scale_fill_distiller(...)
   return(out)
 }
+
+##' Update Predictors for a RiskMap Prediction Object
+##'
+##' This function updates the predictors of a given RiskMap prediction object. It ensures that the new predictors match the original prediction grid and updates the relevant components of the object accordingly.
+##'
+##' @param object A `RiskMap.pred.re` object, which is the output of the \code{\link{pred_over_grid}} function.
+##' @param predictors A data frame containing the new predictor values. The number of rows must match the prediction grid in the `object`.
+##'
+##' @details
+##' The function performs several checks and updates:
+##' \itemize{
+##'   \item Ensures that `object` is of class `RiskMap.pred.re`.
+##'   \item Ensures that the number of rows in `predictors` matches the prediction grid in `object`.
+##'   \item Removes any rows with missing values in `predictors` and updates the corresponding components of the `object`.
+##'   \item Updates the prediction locations, the predictive samples for the random effects, and the linear predictor.
+##' }
+##'
+##' @return The updated `RiskMap.pred.re` object.
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @export
+update_predictors <- function(object,
+                              predictors) {
+  if(!inherits(object,
+               what = "RiskMap.pred.re", which = FALSE)) {
+    stop("The object passed to 'object' must be an output of
+         the function 'glgpm'")
+  }
+  grp <- st_coordinates(object$grid_pred)
+  n_pred <- nrow(grp)
+  par_hat <- object$par_hat
+  p <- length(par_hat$beta)
+
+  inter_f <- object$inter_f
+  inter_lt_f <- inter_f
+  inter_lt_f$pf <- update(inter_lt_f$pf, NULL ~.)
+
+  if(p==1) {
+    stop("No update of the prectors can be done for an intercept only model")
+  }
+
+  if(!is.data.frame(predictors)) stop("'predictors' must be an object of class 'data.frame'")
+  if(nrow(predictors)!=n_pred) stop("the values provided for 'predictors' do not match the prediction grid passed to 'grid_pred'")
+
+  if(any(is.na(predictors))) {
+    warning("There are missing values in 'predictors'; these values have been removed
+              alongside the corresponding prediction locations, and predictive samples
+            for the random effects")
+  }
+
+  if(!is.null(object$re_predictors)) {
+
+    comb_pred <- data.frame(predictors,
+                            object$re_predictors)
+    ind_c <- complete.cases(comb_pred)
+    predictors_aux <- data.frame(na.omit(comb_pred)[,1:ncol(predictors)])
+    colnames(predictors_aux) <- colnames(predictors)
+    predictors <- predictors_aux
+
+    re_predictors_aux <- data.frame(na.omit(comb_pred)[,(ncol(predictors)+1):
+                                                         (ncol(predictors)+
+                                                            ncol(object$re_predictors))])
+    colnames(re_predictors_aux) <- colnames(re_predictors_aux)
+    object$re_predictors <- re_predictors_aux
+
+    n_re <- length(object$re$samples)
+    for(i in 1:n_re) {
+      object$re$D_pred[[i]] <- object$re$D_pred[[i]][ind_c,]
+    }
+
+  } else {
+    comb_pred <- predictors
+    ind_c <- complete.cases(comb_pred)
+    predictors_aux <- data.frame(na.omit(comb_pred))
+    colnames(predictors_aux) <- colnames(predictors)
+    predictors <- predictors_aux
+  }
+
+  grid_pred_aux <- st_coordinates(object$grid_pred)[ind_c,]
+  object$grid_pred <- st_as_sf(data.frame(grid_pred_aux),
+                               coords = c("X","Y"),
+                               crs = st_crs(object$grid_pred)$input)
+  grp <- st_coordinates(object$grid_pred)
+  n_pred <- nrow(grp)
+  object$S_samples <- object$S_samples[ind_c,]
+
+  mf_pred <- model.frame(inter_lt_f$pf,data=predictors, na.action = na.fail)
+  D_pred <- as.matrix(model.matrix(attr(mf_pred,"terms"),data=predictors))
+  if(ncol(D_pred)!=p) stop("the provided variables in 'predictors' do not match the number of explanatory variables used to fit the model.")
+  mu_pred <- as.numeric(D_pred%*%par_hat$beta)
+
+  object$mu_pred <- mu_pred
+  out <- object
+  class(out) <- "RiskMap.pred.re"
+  return(out)
+}
+
