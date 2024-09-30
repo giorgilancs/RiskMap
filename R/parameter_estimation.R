@@ -3,7 +3,7 @@
 ##' @param formula A formula object specifying the model to be fitted. The formula should include fixed effects, random effects (specified using \code{re()}), and spatial effects (specified using \code{gp()}).
 ##' @param data A data frame or sf object containing the variables in the model.
 ##' @param family A character string specifying the distribution of the response variable. Must be one of "gaussian", "binomial", or "poisson".
-##' @param distr_offset Optional offset for binomial or Poisson distributions. If not provided, defaults to 1 for binomial.
+##' @param den Optional offset for binomial or Poisson distributions. If not provided, defaults to 1 for binomial.
 ##' @param cov_offset Optional numeric vector for covariate offset.
 ##' @param crs Optional integer specifying the Coordinate Reference System (CRS) if data is not an sf object. Defaults to 4326 (long/lat).
 ##' @param convert_to_crs Optional integer specifying a CRS to convert the spatial coordinates.
@@ -55,7 +55,7 @@
 glgpm <- function(formula,
                  data,
                  family,
-                 distr_offset = NULL,
+                 den = NULL,
                  cov_offset = NULL,
                  crs = NULL, convert_to_crs = NULL,
                  scale_to_km = TRUE,
@@ -145,17 +145,17 @@ glgpm <- function(formula,
 
   # Define distributional offset for Binomial and Poisson distributions
   if(nong) {
-    do_name <- deparse(substitute(distr_offset))
+    do_name <- deparse(substitute(den))
     if(do_name=="NULL") {
       units_m <- 1
-      if(family=="binomial") warning("'distr_offset' is assumed to be 1 for all observations")
+      if(family=="binomial") warning("'den' is assumed to be 1 for all observations")
     } else {
       units_m <- data[[do_name]]
     }
     if(is.integer(units_m)) units_m <- as.numeric(units_m)
-    if(!is.numeric(units_m)) stop("the variable passed to `distr_offset` must be numeric")
+    if(!is.numeric(units_m)) stop("the variable passed to `den` must be numeric")
     if(family=="binomial" & any(y > units_m)) stop("The counts identified by the outcome variable cannot be larger
-                              than `distr_offset` in the case of a Binomial distribution")
+                              than `den` in the case of a Binomial distribution")
     if(!inherits(control_mcmc,
                  what = "mcmc.RiskMap", which = FALSE)) {
       stop ("the argument passed to 'control_mcmc' must be an output
@@ -1259,7 +1259,8 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
 ##' @param formula Model formula indicating the variables of the model to be simulated.
 ##' @param data Data frame or 'sf' object containing the variables in the model formula.
 ##' @param family Distribution family for the response variable. Must be one of 'gaussian', 'binomial', or 'poisson'.
-##' @param distr_offset Offset for the distributional part of the GLGPM. Required for 'binomial' and 'poisson' families.
+##' @param den Required for 'binomial' to denote the denominator (i.e. number of trials) of the Binomial distribution.
+##' For the 'poisson' family, the argument is optional and is used a multiplicative term to express the mean counts.
 ##' @param cov_offset Offset for the covariate part of the GLGPM.
 ##' @param crs Coordinate reference system (CRS) code for spatial data.
 ##' @param convert_to_crs CRS code to convert spatial data if different from 'crs'.
@@ -1284,7 +1285,7 @@ glgpm_sim <- function(n_sim,
                       formula = NULL,
                       data = NULL,
                       family = NULL,
-                      distr_offset = NULL,
+                      den = NULL,
                       cov_offset = NULL,
                       crs = NULL, convert_to_crs = NULL,
                       scale_to_km = TRUE,
