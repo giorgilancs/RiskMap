@@ -519,11 +519,17 @@ pred_target_grid <- function(object,
     object$S_samples <- object$S_samples+Z_sim
   }
 
-
-  out$lp_samples <- sapply(1:n_samples,
-                           function(i)
-                             mu_target + cov_offset +
-                             object$S_samples[,i])
+  if(is.matrix(mu_target)) {
+    out$lp_samples <- sapply(1:n_samples,
+                             function(i)
+                               mu_target[,i] + cov_offset +
+                               object$S_samples[,i])
+  } else {
+    out$lp_samples <- sapply(1:n_samples,
+                             function(i)
+                               mu_target + cov_offset +
+                               object$S_samples[,i])
+  }
 
   if(include_re) {
     n_dim_re <- sapply(1:n_re, function(i) length(object$re$samples[[i]]))
@@ -736,10 +742,17 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   }
 
   out <- list()
-  out$lp_samples <- sapply(1:n_samples,
-                           function(i)
-                             mu_target + cov_offset +
-                             object$S_samples[,i])
+  if(is.matrix(mu_target)) {
+    out$lp_samples <- sapply(1:n_samples,
+                             function(i)
+                               mu_target[,i] + cov_offset +
+                               object$S_samples[,i])
+  } else {
+    out$lp_samples <- sapply(1:n_samples,
+                             function(i)
+                               mu_target + cov_offset +
+                               object$S_samples[,i])
+  }
   if(include_re) {
     n_dim_re <- sapply(1:n_re, function(i) length(object$re$samples[[i]]))
 

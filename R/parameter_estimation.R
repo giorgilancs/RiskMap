@@ -148,7 +148,7 @@ glgpm <- function(formula,
     do_name <- deparse(substitute(den))
     if(do_name=="NULL") {
       units_m <- 1
-      if(family=="binomial") warning("'den' is assumed to be 1 for all observations")
+      if(family=="binomial") warning("'den' is assumed to be 1 for all observations \n")
     } else {
       units_m <- data[[do_name]]
     }

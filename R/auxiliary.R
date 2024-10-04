@@ -4,6 +4,50 @@
 #' @importFrom stats poisson printCoefmat qnorm reformulate rnorm
 #' @importFrom stats runif sd step terms terms.formula update
 
+##' @title Convex Hull of an sf Object
+##'
+##' @description Computes the convex hull of an `sf` object, returning the boundaries of the smallest polygon that can enclose all geometries in the input.
+##'
+##' @param sf_object An `sf` data frame object containing geometries.
+##'
+##' @return An `sf` object representing the convex hull of the input geometries.
+##'
+##' @details The convex hull is the smallest convex polygon that encloses all points in the input `sf` object. This function computes the convex hull by first uniting all geometries in the input using `st_union()`, and then applying `st_convex_hull()` to obtain the polygonal boundary. The result is returned as an `sf` object containing the convex hull geometry.
+##'
+##' @seealso \code{\link[sf]{st_convex_hull}}, \code{\link[sf]{st_union}}
+##'
+##' @examples
+##' library(sf)
+##'
+##' # Create example sf object
+##' points <- st_sfc(st_point(c(0,0)), st_point(c(1,1)), st_point(c(2,2)), st_point(c(0,2)))
+##' sf_points <- st_sf(geometry = points)
+##'
+##' # Calculate the convex hull
+##' convex_hull_result <- convex_hull_sf(sf_points)
+##'
+##' # Plot the result
+##' plot(sf_points, col = 'blue', pch = 19)
+##' plot(convex_hull_result, add = TRUE, border = 'red')
+##' @importFrom sf st_geometry st_convex_hull st_sf st_union
+##' @export
+convex_hull_sf <- function(sf_object) {
+  # Check if the input is an sf object
+  if (!inherits(sf_object, "sf")) {
+    stop("`sf_object` must be an sf object")
+  }
+
+  # Get the geometry from the sf object
+  geometry <- st_geometry(sf_object)
+
+  # Compute the convex hull
+  convex_hull <- st_convex_hull(st_union(geometry))
+
+  # Return the convex hull as an sf object
+  return(st_sf(geometry = convex_hull))
+}
+
+
 ##' @title EPSG of the UTM Zone
 ##' @description Suggests the EPSG code for the UTM zone where the majority of the data falls.
 ##' @param data An object of class \code{sf} containing the coordinates.
@@ -19,7 +63,7 @@ propose_utm <- function(data) {
   if(is.na(st_crs(data))) stop("the CRS of the data is missing and must be specified; see ?st_crs")
 
   data <- st_transform(data, crs = 4326)
-  utm_z <- floor((st_coordinates(data)[,2] + 180) / 6) + 1
+  utm_z <- floor((st_coordinates(data)[,1] + 180) / 6) + 1
   utm_z_u <- unique(utm_z)
   if(length(utm_z_u) > 1) {
     tab_utm <- table(utm_z)

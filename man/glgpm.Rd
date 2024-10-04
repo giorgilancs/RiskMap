@@ -8,7 +8,7 @@ glgpm(
   formula,
   data,
   family,
-  distr_offset = NULL,
+  den = NULL,
   cov_offset = NULL,
   crs = NULL,
   convert_to_crs = NULL,
@@ -30,7 +30,7 @@ glgpm(
 
 \item{family}{A character string specifying the distribution of the response variable. Must be one of "gaussian", "binomial", or "poisson".}
 
-\item{distr_offset}{Optional offset for binomial or Poisson distributions. If not provided, defaults to 1 for binomial.}
+\item{den}{Optional offset for binomial or Poisson distributions. If not provided, defaults to 1 for binomial.}
 
 \item{cov_offset}{Optional numeric vector for covariate offset.}
 
