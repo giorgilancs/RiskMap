@@ -786,6 +786,10 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   shp <- st_transform(shp, crs = st_crs(object$grid_pred)$input)
   inter <- st_intersects(shp, object$grid_pred)
 
+  if(any(is.na(weights))) {
+    warning("Missing values found in 'weights' are set to 0")
+    weights[is.na(weights)] <- 0
+  }
   no_comp <- NULL
   for(h in 1:n_reg) {
     message("Computing predictive target for:",shp[[col_names]][h])
