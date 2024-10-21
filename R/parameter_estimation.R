@@ -143,7 +143,7 @@ glgpm <- function(formula,
     if(length(cov_offset)!=n) stop("the offset values do not match the number of observations in the data")
   }
 
-  # Define distributional offset for Binomial and Poisson distributions
+  # Define denominators for Binomial and Poisson distributions
   if(nong) {
     do_name <- deparse(substitute(den))
     if(do_name=="NULL") {

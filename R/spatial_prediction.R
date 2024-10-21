@@ -452,7 +452,7 @@ pred_target_grid <- function(object,
   if(!inherits(object,
                what = "RiskMap.pred.re", which = FALSE)) {
     stop("The object passed to 'object' must be an output of
-         the function 'pred_S'")
+         the function 'pred_over_grid'")
   }
 
   if(is.null(object$par_hat$tau2) &
@@ -787,7 +787,7 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   inter <- st_intersects(shp, object$grid_pred)
 
   if(any(is.na(weights))) {
-    warning("Missing values found in 'weights' are set to 0")
+    warning("Missing values found in 'weights' are set to 0 \n")
     weights[is.na(weights)] <- 0
   }
   no_comp <- NULL
@@ -972,3 +972,117 @@ update_predictors <- function(object,
   return(out)
 }
 
+##' @importFrom sf st_as_sfc
+score_model <- function(object, new_data, den = NULL,
+                        control_sim = set_control_sim(),
+                        pred_cov_offset = NULL) {
+
+  if(!inherits(object,
+               what = "RiskMap", which = FALSE)) {
+    stop("The object passed to 'object' must be an output of
+         the function 'glgpm'")
+  }
+
+  if(!inherits(new_data,
+               what = c("sf", "data.frame"), which = FALSE)) {
+    stop("The object passed to 'new_data' must be a data.frame and sf object")
+  }
+
+  if(!inherits(control_sim,
+               what = "mcmc.RiskMap", which = FALSE)) {
+    stop ("the argument passed to 'control_sim' must be an output
+                                                  from the function set_control_sim; see ?set_control_sim
+                                                  for more details")
+
+  }
+
+  if(!(st_crs(new_data)==st_crs(object$data_sf))) {
+    stop("The CRS of 'new_data' must be the same as the CRS of the data after fitting
+         the model")
+  }
+
+
+  # Define denominators for Binomial and Poisson distributions
+  inter_f <- interpret.formula(object$formula)
+  mf <- model.frame(inter_f$pf,data=new_data, na.action = na.fail)
+
+  # Extract outcome data
+  y <- as.numeric(model.response(mf))
+
+  nong <- object$family!="gaussian"
+  if(nong) {
+    do_name <- deparse(substitute(den))
+    if(do_name=="NULL") {
+      units_m <- 1
+      if(family=="binomial") warning("'den' is assumed to be 1 for all observations \n")
+    } else {
+      units_m <- data[[do_name]]
+    }
+    if(is.integer(units_m)) units_m <- as.numeric(units_m)
+    if(!is.numeric(units_m)) stop("the variable passed to `den` must be numeric")
+    if(family=="binomial" & any(y > units_m)) stop("The counts identified by the outcome variable cannot be larger
+                              than `den` in the case of a Binomial distribution")
+
+  }
+  grp <- st_coordinates(new_data)
+
+  pred_new_data_S <-
+  pred_over_grid(object = object, grid_pred = st_as_sfc(new_data),
+                 predictors = new_data, pred_cov_offset = pred_cov_offset,
+                 type = "marginal")
+
+  if(object$family=="gaussian") {
+    f_glm <- function(x) x
+  } else if(object$family=="binomial") {
+    f_glm <- function(x) exp(x)/(1+exp(x))
+  } else if(object$family=="poisson") {
+    f_glm <- function(x) exp(x)
+  }
+
+  if(!is.null(object$fix_tau2)) {
+    if(object$fix_tau2==0) i_ne <- FALSE
+  } else {
+    i_ne <- TRUE
+  }
+  if(pred_new_data_S$cov_offset==0) {
+    i_co <- FALSE
+  } else {
+    i <- TRUE
+  }
+
+  pred_lp <-
+  pred_target_grid(pred_new_data_S,
+                   include_nugget = i_ne,
+                   include_cov_offset = i_co)
+  f_glm_samples <- f_glm(pred_lp$lp_samples)
+
+  n_pred <- nrow(new_data)
+  n_samples <- ncol(pred_lp$lp_samples)
+
+  F_list <- list()
+  for(i in 1:n_pred) {
+    if(object$family == "binomial") {
+      y_samples <- rbinom(n_samples, units_m[i], prob = f_glm_samples[i,])
+    } else {
+      y_samples <- rpois(n_samples, lam = units_m[i]*f_glm_samples[i,])
+    }
+    F_list[[i]] <- ecdf(y_samples)
+
+  }
+
+  out <- list()
+  crps <- rep(NA, n_pred)
+
+  for(i in 1:n_pred) {
+    if(object$family=="binomial") {
+      F_list_i <- function(x) F_list[[i]] (x*units_m[i])
+      crps[i] <- integrate(function(x) -(F_list_i(x)-1*(x>=y[i]/units_m[i]))^2,
+                           lower = 0, upper = 1,
+                           subdivisions = 10000)$value
+    }
+  }
+
+  out$crps <- crps
+  class(out) <- "RiskMap.pred.re"
+  return(out)
+}
