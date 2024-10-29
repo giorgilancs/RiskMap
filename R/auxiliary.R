@@ -656,3 +656,49 @@ to_table <- function(object, ...) {
   out <- xtable(x = tab,...)
   return(out)
 }
+
+##' @title Compute Unique Coordinate Identifiers
+##'
+##' @description
+##' This function identifies unique coordinates from a `sf` (simple feature) object
+##' and assigns an identifier to each coordinate occurrence. It returns a list
+##' containing the identifiers for each row and a vector of unique identifiers.
+##'
+##' @param data_sf An `sf` object containing geometrical data from which coordinates are extracted.
+##'
+##' @return A list with the following elements:
+##' \describe{
+##'   \item{ID_coords}{An integer vector where each element corresponds to a row in the input,
+##'   indicating the index of the unique coordinate in the full set of unique coordinates.}
+##'   \item{s_unique}{An integer vector containing the unique identifiers of all distinct coordinates.}
+##' }
+##'
+##' @details
+##' The function extracts the coordinate pairs from the `sf` object and determines the unique
+##' coordinates. It then assigns each row in the input data an identifier corresponding
+##' to the unique coordinate it matches.
+##'
+##' @importFrom sf st_coordinates
+##' @export
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##'
+##'
+compute_ID_coords <- function(data_sf) {
+  if(!inherits(data_sf,
+               what = c("sfc","sf"), which = FALSE)) {
+    stop("The object passed to 'grid_pred' must be an object
+         of class 'sfc'")
+  }
+  coords_o <- st_coordinates(data_sf)
+  coords <- unique(coords_o)
+
+  m <- nrow(coords_o)
+  ID_coords <- sapply(1:m, function(i)
+    which(coords_o[i,1]==coords[,1] &
+            coords_o[i,2]==coords[,2]))
+  out <- list()
+  out$ID_coords <- ID_coords
+  out$s_unique <- unique(ID_coords)
+  return(out)
+}
+
