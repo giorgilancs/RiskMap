@@ -1015,7 +1015,7 @@ update_predictors <- function(object,
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @export
 
-score_model <- function(object,
+score_models <- function(object,
                         keep_par_fixed = TRUE,
                         fold, n_size=NULL,
                         control_sim = set_control_sim(),
@@ -1024,11 +1024,18 @@ score_model <- function(object,
                         messages = TRUE,
                         which_metric = "crps",
                         ...) {
+  is_list_of_riskmap <- function(object) {
+    # Check if the object is a list
+    if (!is.list(object)) {
+      return(FALSE)
+    }
+    # Check if all elements in the list are of class "RiskMap"
+    all(sapply(object, function(x) inherits(x, "RiskMap")))
+  }
 
-  if(!inherits(object,
-               what = "RiskMap", which = FALSE)) {
-    stop("The object passed to 'object' must be an output of
-         the function 'glgpm'")
+  if(!is_list_of_riskmap(object)) {
+    stop("The object passed to 'object' must be a list model fits, each obtained as
+         an output of the function 'glgpm'")
   }
 
   if (!all(which_metric %in% c("crps", "scrps"))) {
@@ -1072,7 +1079,8 @@ score_model <- function(object,
 
 
   # Select test set
-  data_sf <- object$data_sf
+  object1 <- object[[1]]
+  data_sf <- object1$data_sf
   if(method=="cluster") {
     data_split <-
       spatial_clustering_cv(data = data_sf,
@@ -1088,12 +1096,6 @@ score_model <- function(object,
       data_split$splits[[i]]$data <- data_sf[data_split$splits[[i]]$in_id,]
     }
   }
-
-
-  # data_split <-     spatial_clustering_cv(data = data_sf, v = fold)
-  par_hat <- coef(object)
-  den_name <- as.character(object$call$den)
-  if(object$cov_offset==0) object$cov_offset <- NULL
 
   if(plot_fold) {
     if(method=="cluster") {
@@ -1117,149 +1119,160 @@ score_model <- function(object,
       }
     }
   }
-  refit <- list()
 
-  for(i in 1:fold) {
-    new_data_i <- data_sf[data_split$splits[[i]]$in_id,]
-    if(!keep_par_fixed) {
-      message("\n Re-estimating the model for the Subset no. ",i,"\n")
+  n_models <- length(object)
+  model_names <- names(object)
+  out <- list()
+  for(h in 1:n_models) {
+    # data_split <-     spatial_clustering_cv(data = data_sf, v = fold)
+    par_hat <- coef(object[[h]])
+    den_name <- as.character(object[[h]]$call$den)
+    if(object[[h]]$cov_offset==0) object[[h]]$cov_offset <- NULL
 
-      refit[[i]] <- eval(bquote(
-        glgpm(
-          formula = .(object$formula),
-          data = new_data_i,
-          cov_offset = .(object$cov_offset),
-          family = .(object$family),
-          crs =  .(object$crs),
-          scale_to_km = .(object$scale_to_km),
-          control_mcmc = control_sim,
-          fix_var_me = .(object$fix_var_me),
-          den = .(as.name(den_name)),
-          messages = messages,
-          start_pars = par_hat
-        )
-      ))
-    } else {
-      refit[[i]] <- object
-      refit[[i]]$data_sf <- object$data_sf[data_split$splits[[i]]$in_id,]
-      refit[[i]]$units_m <- object$units_m[data_split$splits[[i]]$in_id]
-      refit[[i]]$coords <- object$coords[data_split$splits[[i]]$in_id,]
-      refit[[i]]$y <- object$y[data_split$splits[[i]]$in_id]
-      refit[[i]]$D <- as.matrix(object$D[data_split$splits[[i]]$in_id,])
-      colnames(refit[[i]]$D) <- colnames(object$D)
-      refit[[i]]$ID_coords <- compute_ID_coords(refit[[i]]$data_sf)$ID_coords
-      if(!is.null(object$cov_offset)) {
-        refit[[i]]$cov_offset <- object$cov_offset[data_split$splits[[i]]$in_id]
+    refit <- list()
+
+    for(i in 1:fold) {
+      new_data_i <- data_sf[data_split$splits[[i]]$in_id,]
+      if(!keep_par_fixed) {
+        message("\n Re-estimating the model for the Subset no. ",i,"\n")
+
+        refit[[i]] <- eval(bquote(
+          glgpm(
+            formula = .(object[[h]]$formula),
+            data = new_data_i,
+            cov_offset = .(object[[h]]$cov_offset),
+            family = .(object[[h]]$family),
+            crs =  .(object[[h]]$crs),
+            scale_to_km = .(object[[h]]$scale_to_km),
+            control_mcmc = control_sim,
+            fix_var_me = .(object[[h]]$fix_var_me),
+            den = .(as.name(den_name)),
+            messages = FALSE,
+            start_pars = par_hat
+          )
+        ))
+      } else {
+        refit[[i]] <- object[[h]]
+        refit[[i]]$data_sf <- object[[h]]$data_sf[data_split$splits[[i]]$in_id,]
+        refit[[i]]$units_m <- object[[h]]$units_m[data_split$splits[[i]]$in_id]
+        refit[[i]]$coords <- object[[h]]$coords[data_split$splits[[i]]$in_id,]
+        refit[[i]]$y <- object[[h]]$y[data_split$splits[[i]]$in_id]
+        refit[[i]]$D <- as.matrix(object[[h]]$D[data_split$splits[[i]]$in_id,])
+        colnames(refit[[i]]$D) <- colnames(object[[h]]$D)
+        refit[[i]]$ID_coords <- compute_ID_coords(refit[[i]]$data_sf)$ID_coords
+        if(!is.null(object[[h]]$cov_offset)) {
+          refit[[i]]$cov_offset <- object[[h]]$cov_offset[data_split$splits[[i]]$in_id]
+        }
       }
     }
-  }
 
-  if(object$family=="gaussian") {
-    f_glm <- function(x) x
-  } else if(object$family=="binomial") {
-    f_glm <- function(x) exp(x)/(1+exp(x))
-  } else if(object$family=="poisson") {
-    f_glm <- function(x) exp(x)
-  }
-
-  pred_new_data_S <- list()
-  pred_lp <- list()
-
-  if(!is.null(object$fix_tau2)) {
-    if(object$fix_tau2==0) i_ne <- FALSE
-  } else {
-    i_ne <- TRUE
-  }
-  if(is.null(object$cov_offset)) {
-    i_co <- FALSE
-  } else {
-    i_co <- TRUE
-  }
-  if(get_crps) {
-    crps <- list()
-  }
-  if(get_scrps) {
-    y_crps <- list()
-    scrps <- list()
-  }
-  for(i in 1:fold) {
-
-    data_sf_i <- object$data_sf[-data_split$splits[[i]]$in_id,]
-    if(!is.null(object$cov_offset)) {
-      pred_cov_offset_i <- object$cov_offset[-data_split$splits[[i]]$in_id]
-    } else {
-      pred_cov_offset_i <- NULL
+    if(object[[h]]$family=="gaussian") {
+      f_glm <- function(x) x
+    } else if(object[[h]]$family=="binomial") {
+      f_glm <- function(x) exp(x)/(1+exp(x))
+    } else if(object[[h]]$family=="poisson") {
+      f_glm <- function(x) exp(x)
     }
 
-    message("\n Spatial prediction for the Subset no. ",i,"\n")
+    pred_new_data_S <- list()
+    pred_lp <- list()
 
-    pred_new_data_S[[i]] <-
-      pred_over_grid(object = refit[[i]], grid_pred = st_as_sfc(data_sf_i),
-                     control_sim = control_sim,
-                     predictors = data_sf_i, pred_cov_offset = pred_cov_offset_i,
-                     type = "marginal",
-                     messages = messages)
-
-    pred_lp[[i]] <-
-      pred_target_grid(pred_new_data_S[[i]],
-                       include_nugget = i_ne,
-                       include_cov_offset = i_co)
-
-    f_glm_samples <- f_glm(pred_lp[[i]]$lp_samples)
-
-    n_pred <- nrow(data_sf_i)
-    n_samples <- ncol(pred_lp[[i]]$lp_samples)
-
-    F_list <- list()
-    units_m_i <- object$units_m[-data_split$splits[[i]]$in_id]
-    y_i <- object$y[-data_split$splits[[i]]$in_id]
-
+    if(!is.null(object[[h]]$fix_tau2)) {
+      if(object[[h]]$fix_tau2==0) i_ne <- FALSE
+    } else {
+      i_ne <- TRUE
+    }
+    if(is.null(object[[h]]$cov_offset)) {
+      i_co <- FALSE
+    } else {
+      i_co <- TRUE
+    }
     if(get_crps) {
-      crps[[i]] <- rep(NA, n_pred)
+      crps <- list()
     }
     if(get_scrps) {
-      y_crps[[i]] <- rep(NA, n_pred)
-      scrps[[i]] <- rep(NA, n_pred)
+      y_crps <- list()
+      scrps <- list()
     }
-    for(j in 1:n_pred) {
-      if(object$family == "binomial") {
-        y_samples <- rbinom(n_samples, units_m_i[j], prob = f_glm_samples[j,])
+    for(i in 1:fold) {
+
+      data_sf_i <- object[[h]]$data_sf[-data_split$splits[[i]]$in_id,]
+      if(!is.null(object[[h]]$cov_offset)) {
+        pred_cov_offset_i <- object[[h]]$cov_offset[-data_split$splits[[i]]$in_id]
       } else {
-        y_samples <- rpois(n_samples, lambda = units_m_i[j]*f_glm_samples[j,])
+        pred_cov_offset_i <- NULL
       }
-      F_list[[j]] <- ecdf(y_samples)
-      if(object$family=="binomial") {
-        F_list_j <- function(x) F_list[[j]](x*units_m_i[j])
 
-        if(get_crps) {
-          crps[[i]][j] <- integrate(function(x) -(F_list_j(x)-1*(x>=y_i[j]/units_m_i[j]))^2,
-                                    lower = 0, upper = 1,
-                                    subdivisions = 10000)$value
+      message("\n Model: ", paste(model_names[h]),"\n Spatial prediction for the Subset no. ",i,"\n")
+
+      pred_new_data_S[[i]] <-
+        pred_over_grid(object = refit[[i]], grid_pred = st_as_sfc(data_sf_i),
+                       control_sim = control_sim,
+                       predictors = data_sf_i, pred_cov_offset = pred_cov_offset_i,
+                       type = "marginal",
+                       messages = FALSE)
+
+      pred_lp[[i]] <-
+        pred_target_grid(pred_new_data_S[[i]],
+                         include_nugget = i_ne,
+                         include_cov_offset = i_co)
+
+      f_glm_samples <- f_glm(pred_lp[[i]]$lp_samples)
+
+      n_pred <- nrow(data_sf_i)
+      n_samples <- ncol(pred_lp[[i]]$lp_samples)
+
+      F_list <- list()
+      units_m_i <- object[[h]]$units_m[-data_split$splits[[i]]$in_id]
+      y_i <- object[[h]]$y[-data_split$splits[[i]]$in_id]
+
+      if(get_crps) {
+        crps[[i]] <- rep(NA, n_pred)
+      }
+      if(get_scrps) {
+        y_crps[[i]] <- rep(NA, n_pred)
+        scrps[[i]] <- rep(NA, n_pred)
+      }
+      for(j in 1:n_pred) {
+        if(object[[h]]$family == "binomial") {
+          y_samples <- rbinom(n_samples, units_m_i[j], prob = f_glm_samples[j,])
+        } else {
+          y_samples <- rpois(n_samples, lambda = units_m_i[j]*f_glm_samples[j,])
         }
+        F_list[[j]] <- ecdf(y_samples)
+        if(object[[h]]$family=="binomial") {
+          F_list_j <- function(x) F_list[[j]](x*units_m_i[j])
 
-        if(get_scrps) {
-          y_crps[[i]][j] <- mean(sapply(y_samples,
-                                        function(y) integrate(function(x)
-                                          -(F_list_j(x)-1*(x>=y/units_m_i[j]))^2,
-                                          lower = 0, upper = 1,
-                                          subdivisions = 10000)$value))
-          scrps[[i]][j] <- -0.5*(1+crps[[i]][j]/y_crps[[i]][j]+
-                                   log(2*abs(y_crps[[i]][j])))
+          if(get_crps) {
+            crps[[i]][j] <- integrate(function(x) -(F_list_j(x)-1*(x>=y_i[j]/units_m_i[j]))^2,
+                                      lower = 0, upper = 1,
+                                      subdivisions = 10000)$value
+          }
+
+          if(get_scrps) {
+            y_crps[[i]][j] <- mean(sapply(y_samples,
+                                          function(y) integrate(function(x)
+                                            -(F_list_j(x)-1*(x>=y/units_m_i[j]))^2,
+                                            lower = 0, upper = 1,
+                                            subdivisions = 10000)$value))
+            scrps[[i]][j] <- -0.5*(1+crps[[i]][j]/y_crps[[i]][j]+
+                                     log(2*abs(y_crps[[i]][j])))
+          }
         }
       }
     }
-  }
-  out <- list()
-  if(get_crps) {
-    out$crps <- crps
-  }
+    out[[paste(model_names[h])]] <- list(score = list())
+    if(get_crps) {
+      out[[paste(model_names[h])]]$score$crps <- crps
+    }
 
-  if(get_scrps) {
-    out$scrps <- scrps
+    if(get_scrps) {
+      out[[paste(model_names[h])]]$score$scrps <- scrps
+    }
+    out[[paste(model_names[h])]]$refit <- refit
   }
-
-  out$refit <- refit
 
   class(out) <- "RiskMap.spatial.cv"
   return(out)
 }
+

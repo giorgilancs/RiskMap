@@ -630,30 +630,60 @@ print.summary.RiskMap <- function(x, ...) {
 }
 
 
-##' @title Create LaTeX Table from Model Fit
-##' @description Converts a "RiskMap" model fit into an \code{xtable} object, which can then be printed as a LaTeX or HTML table.
-##' @param object An object of class "RiskMap" obtained as a result of a call to \code{\link{glgpm}}.
-##' @param ... Additional arguments to be passed to \code{\link[xtable]{xtable}}.
-##' @details This function takes a fitted "RiskMap" model and converts it into an \code{xtable} object. The resulting table includes:
+##' @title Generate LaTeX Tables from RiskMap Model Fits and Validation
+##' @description Converts a fitted "RiskMap" model or cross-validation results into an \code{xtable} object, formatted for easy export to LaTeX or HTML.
+##' @param object An object of class "RiskMap" resulting from a call to \code{\link{glgpm}}, or a summary object of class "summary.RiskMap.spatial.cv" containing cross-validation results.
+##' @param ... Additional arguments to be passed to \code{\link[xtable]{xtable}} for customization.
+##' @details This function creates a summary table from a fitted "RiskMap" model or cross-validation results for multiple models, returning it as an \code{xtable} object.
+##'
+##' When the input is a "RiskMap" model object, the table includes:
 ##' \itemize{
 ##'   \item Regression coefficients with their estimates, confidence intervals, and p-values.
-##'   \item Spatial process parameters.
-##'   \item Random effects variances.
+##'   \item Parameters for the spatial process.
+##'   \item Random effect variances.
 ##'   \item Measurement error variance, if applicable.
 ##' }
-##' The \code{xtable} object can be customized further using additional arguments and then printed as a LaTeX or HTML table.
-##' @return An object of class "xtable" which inherits the \code{data.frame} class and contains several additional attributes specifying the table formatting options.
+##'
+##' When the input is a cross-validation summary object ("summary.RiskMap.spatial.cv"), the table includes:
+##' \itemize{
+##'   \item A row for each model being compared.
+##'   \item Performance metrics such as CRPS and SCRPS for each model.
+##' }
+##'
+##' The resulting \code{xtable} object can be further customized with additional formatting options and printed as a LaTeX or HTML table for reports or publications.
+##' @return An object of class "xtable", which contains the formatted table as a \code{data.frame} and several attributes specifying table formatting options.
 ##' @importFrom xtable xtable
 ##' @export
-##' @seealso \code{\link{glgpm}}, \code{\link[xtable]{xtable}}
+##' @seealso \code{\link{glgpm}}, \code{\link[xtable]{xtable}}, \code{\link{summary.RiskMap.spatial.cv}}
+##' @examples
+##' # Example usage with a RiskMap model object:
+##' model_fit <- glgpm(...)
+##' table_latex <- to_table(model_fit)
+##'
+##' # Example usage with cross-validation results:
+##' cv_summary <- summary(cv_results)
+##' table_latex <- to_table(cv_summary)
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
-##'
 to_table <- function(object, ...) {
   summary_out <- summary(object)
-  tab <- rbind(summary_out$reg_coef[,1:3], summary_out$sp, summary_out$ranef,
-               summary_out$me)
-  out <- xtable(x = tab,...)
+  if(inherits(summary_out,
+               what = "summary.RiskMap", which = FALSE)) {
+    tab <- rbind(summary_out$reg_coef[,1:3], summary_out$sp, summary_out$ranef,
+                 summary_out$me)
+    out <- xtable(x = tab,...)
+  } else if (inherits(summary_out,
+                      what = "summary.RiskMap.spatial.cv", which = FALSE)) {
+    n_models <- nrow(summary_out)
+    n_metrics <- ncol(summary_out)
+    model_names <- rownames(summary_out)
+    metric_names <- toupper(colnames(summary_out))
+    tab <- data.frame(Model = model_names)
+    for(i in 1:n_metrics) {
+      tab[[paste(metric_names[i])]] <- summary_out[,i]
+    }
+    out <- xtable(x = tab,...)
+  }
   return(out)
 }
 
@@ -701,4 +731,118 @@ compute_ID_coords <- function(data_sf) {
   out$s_unique <- unique(ID_coords)
   return(out)
 }
+
+
+##' Summarize Cross-Validation Scores for Spatial RiskMap Models
+##'
+##' This function provides a summary of cross-validation scores for different spatial models
+##' obtained as an output from \code{\link{score_models}}.
+##'
+##' @param object A `RiskMap.spatial.cv` object containing cross-validation scores for each
+##'               model. This obtained as an output from \code{\link{score_models}}.
+##' @param ...    Additional arguments passed to or from other methods.
+##'
+##' @details
+##' The function computes a matrix where rows correspond to models and columns correspond
+##' to performance metrics (e.g., CRPS, SCRPS). The scores are weighted by subset sizes
+##' to provide an average score across subsets for each model and metric.
+##'
+##' @return A matrix of summary scores with models as rows and metrics as columns,
+##'         with class `"summary.RiskMap.spatial.cv"`.
+##'
+##'
+##' @seealso \code{\link{score_models}}
+##'
+##' @export
+##' @method summary RiskMap.spatial.cv
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+summary.RiskMap.spatial.cv <- function(object,...) {
+
+  model_names <- names(object)
+  n_models <- length(model_names)
+
+  metric_names <- names(object[[1]]$score)
+  n_metrics <- length(metric_names)
+
+  res <- matrix(NA, ncol = n_metrics, nrow = n_models)
+  colnames(res) <- metric_names
+  rownames(res) <- model_names
+
+  n_subs <- length(object[[1]]$score[[1]])
+
+  w <- unlist(lapply(object[[1]]$score[[1]], length))
+
+  for(i in 1:n_models) {
+    for(j in 1:n_metrics) {
+      score_j <- rep(NA,n_subs)
+      for(h in 1:n_subs) {
+        score_j[h] <- mean(object[[i]]$score[[j]][[h]])
+      }
+      res[i,j] <- sum(w*score_j[h])/sum(w)
+    }
+  }
+
+  class(res) <- "summary.RiskMap.spatial.cv"
+  return(res)
+}
+
+##' @title Print Summary of RiskMap Spatial Cross-Validation Scores
+##'
+##' @description This function prints the matrix of cross-validation scores produced by
+##' `summary.RiskMap.spatial.cv` in a readable format.
+##'
+##' @param x An object of class `"summary.RiskMap.spatial.cv"`, typically the output of
+##'          `summary.RiskMap.spatial.cv`.
+##' @param ... Additional arguments passed to or from other methods.
+##'
+##' @details
+##' This method is primarily used to format and display the summary score matrix,
+##' printing it to the console. It provides a clear view of the cross-validation performance
+##' metrics across different spatial models.
+##'
+##' @return This function is used for its side effect of printing to the console. It does not
+##'         return a value.
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @export
+##' @method print summary.RiskMap.spatial.cv
+print.summary.RiskMap.spatial.cv <- function(x, ...) {
+  # Convert x to data frame format
+  df <- matrix(x, ncol = ncol(x))
+
+  # Retrieve model and metric names
+  model_names <- rownames(x)
+  metric_names <- colnames(x)
+
+  # Print the header
+  cat("Summary of Model Scores\n")
+  cat("-----------------------\n")
+
+  # Column headers
+  cat(sprintf("%-20s", "Model"))
+  for (metric in metric_names) {
+    cat(sprintf("%-15s", toupper(metric)))
+  }
+  cat("\n")
+
+  # Iterate through each model and metric, printing values
+  for (i in seq_len(nrow(df))) {
+    # Print model name or "Unknown Model" if missing
+    cat(sprintf("%-20s", ifelse(!is.na(model_names[i]), model_names[i], "Unknown Model")))
+
+    # Print each metric in the row, checking for NA or length issues
+    for (j in seq_len(ncol(df))) {
+      metric_value <- df[i, j]
+      # Check if metric_value is scalar and not NA
+      if (is.atomic(metric_value) && length(metric_value) == 1 && !is.na(metric_value)) {
+        cat(sprintf("%-15.4f", metric_value))
+      } else {
+        cat(sprintf("%-15s", "NA"))  # Print "NA" for missing or non-scalar values
+      }
+    }
+    cat("\n")
+  }
+
+  cat("-----------------------\n")
+}
+
 
