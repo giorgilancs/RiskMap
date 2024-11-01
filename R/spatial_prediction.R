@@ -876,8 +876,9 @@ plot.RiskMap_pred_target_shp <- function(x, which_target = "linear_target",
   return(out)
 }
 
-##' Update Predictors for a RiskMap Prediction Object
+##' @title Update Predictors for a RiskMap Prediction Object
 ##'
+##' @description
 ##' This function updates the predictors of a given RiskMap prediction object. It ensures that the new predictors match the original prediction grid and updates the relevant components of the object accordingly.
 ##'
 ##' @param object A `RiskMap.pred.re` object, which is the output of the \code{\link{pred_over_grid}} function.
@@ -972,7 +973,48 @@ update_predictors <- function(object,
   return(out)
 }
 
+##' @title Compute scoring rules using spatial cross-validation
+##'
+##' @description This function calculates the predictive accuracy of a spatial model fitted to a `RiskMap` object using cross-validation.
+##' It allows model scoring based on specified metrics, with options for two cross-validation methods: spatial clustering and regularized subsampling.
+##' Users can choose between continuous ranked probability score (CRPS) and scaled CRPS (SCRPS) as scoring metrics to evaluate predictive quality.
+##' For each data fold, the function can either refit the model or use fixed parameters, enabling flexible model validation and evaluation.
+##' Additionally, it can generate plots of test sets across folds, providing visual insights into the spatial cross-validation structure.
+##'
+##'
+##' @param object A `RiskMap` object, output of the `glgpm` function.
+##' @param keep_par_fixed Logical; if `TRUE`, parameters are kept fixed, otherwise the model is re-estimated for each fold.
+##' @param fold Integer; number of folds for cross-validation.
+##' @param n_size Optional; the size of the test set, required if `method = "regularized"`.
+##' @param control_sim Control settings for simulation as output from `set_control_sim`.
+##' @param method Character; either `"cluster"` or `"regularized"` for the cross-validation method. The `"cluster"` method uses
+##' the spatial clustering as implented by \code{\link{spatial_clustering_cv}} functoin from the `spatialEco` package; the `"regularized"` method
+##' select a subsample of the data-set by imposing a minimum distance - as set in the argument `min_dist` - for a randomly selected
+##' subset of locations.
+##' @param min_dist Optional; minimum distance for regularized subsampling, required if `method = "regularized"`.
+##' @param plot_fold Logical; if `TRUE`, plots each fold's test set.
+##' @param messages Logical; if `TRUE`, displays progress messages.
+##' @param which_metric Character; either `"crps"` or `"scrps"` to specify scoring rule.
+##' @param ... Additional arguments passed to clustering or subsampling functions.
+##'
+##' @return A list of class `RiskMap.spatial.cv`, containing:
+##'   - `crps` or `scrps`: Computed scores for each fold.
+##'   - `refit`: A list of re-fitted models for each fold.
+##'
+##' @seealso \code{\link{spatial_clustering_cv}}, \code{\link{subsample.distance}}
+##'
+##' @importFrom terra match
+##' @importFrom ggplot2 ggplot geom_sf theme_minimal ggtitle
+##' @importFrom gridExtra grid.arrange
+##' @importFrom stats ecdf integrate rbinom rpois
+##' @importFrom spatialEco subsample.distance
+##' @importFrom spatialsample spatial_clustering_cv autoplot
+##'
+##'
 ##' @importFrom sf st_as_sfc
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @export
+
 score_model <- function(object,
                         keep_par_fixed = TRUE,
                         fold, n_size=NULL,

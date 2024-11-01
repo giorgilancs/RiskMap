@@ -5,17 +5,7 @@
 \alias{tz_covariates}
 \title{Covariates Dataset for Malaria Prediction in Tanzania}
 \format{
-A data frame with 8740 observations of 8 variables:
-\itemize{
-  \item{Population}{ Population density in the area (in thousands).}
-  \item{ITN}{ Percentage of households with at least one insecticide-treated net (ITN).}
-  \item{EVI}{ Enhanced Vegetation Index, indicating vegetation density.}
-  \item{Temperature}{ Average temperature in degrees Celsius.}
-  \item{NTL}{ Nighttime light intensity, indicating urbanization and infrastructure.}
-  \item{Precipitation}{ Total precipitation in millimeters.}
-  \item{utm_x}{ UTM (Universal Transverse Mercator) x-coordinate of the grid point.}
-  \item{utm_y}{ UTM (Universal Transverse Mercator) y-coordinate of the grid point.}
-}
+A data frame with 8740 observations of 8 variables.
 The CRS of the UTM coordinates is 32736.
 }
 \source{
@@ -26,5 +16,16 @@ data(tz_covariates)
 }
 \description{
 This dataset provides covariates over a 10 by 10 km regular grid covering Tanzania. It is intended to be used together with the `tz_malaria` dataset for spatial prediction of malaria prevalence.
+
+\describe{
+  \item{Population}{Population density in the area (in thousands).}
+  \item{ITN}{Percentage of households with at least one insecticide-treated net (ITN).}
+  \item{EVI}{Enhanced Vegetation Index, indicating vegetation density.}
+  \item{Temperature}{Average temperature in degrees Celsius.}
+  \item{NTL}{Nighttime light intensity, indicating urbanization and infrastructure.}
+  \item{Precipitation}{Total precipitation in millimeters.}
+  \item{utm_x}{UTM (Universal Transverse Mercator) x-coordinate of the grid point.}
+  \item{utm_y}{UTM (Universal Transverse Mercator) y-coordinate of the grid point.}
+}
 }
 \keyword{datasets}
