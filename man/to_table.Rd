@@ -36,15 +36,6 @@ When the input is a cross-validation summary object ("summary.RiskMap.spatial.cv
 
 The resulting \code{xtable} object can be further customized with additional formatting options and printed as a LaTeX or HTML table for reports or publications.
 }
-\examples{
-# Example usage with a RiskMap model object:
-model_fit <- glgpm(...)
-table_latex <- to_table(model_fit)
-
-# Example usage with cross-validation results:
-cv_summary <- summary(cv_results)
-table_latex <- to_table(cv_summary)
-}
 \seealso{
 \code{\link{glgpm}}, \code{\link[xtable]{xtable}}, \code{\link{summary.RiskMap.spatial.cv}}
 }

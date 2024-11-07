@@ -655,14 +655,6 @@ print.summary.RiskMap <- function(x, ...) {
 ##' @importFrom xtable xtable
 ##' @export
 ##' @seealso \code{\link{glgpm}}, \code{\link[xtable]{xtable}}, \code{\link{summary.RiskMap.spatial.cv}}
-##' @examples
-##' # Example usage with a RiskMap model object:
-##' model_fit <- glgpm(...)
-##' table_latex <- to_table(model_fit)
-##'
-##' # Example usage with cross-validation results:
-##' cv_summary <- summary(cv_results)
-##' table_latex <- to_table(cv_summary)
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 to_table <- function(object, ...) {
