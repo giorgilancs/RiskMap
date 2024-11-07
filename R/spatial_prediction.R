@@ -981,43 +981,42 @@ update_predictors <- function(object,
 ##' For each data fold, the function can either refit the model or use fixed parameters, enabling flexible model validation and evaluation.
 ##' Additionally, it can generate plots of test sets across folds, providing visual insights into the spatial cross-validation structure.
 ##'
-##'
-##' @param object A `RiskMap` object, output of the `glgpm` function.
-##' @param keep_par_fixed Logical; if `TRUE`, parameters are kept fixed, otherwise the model is re-estimated for each fold.
-##' @param fold Integer; number of folds for cross-validation.
+##' @param object A list of `RiskMap` objects, each representing a model fitted with `glgpm`.
+##' @param keep_par_fixed Logical; if `TRUE`, parameters are kept fixed across folds, otherwise the model is re-estimated for each fold.
+##' @param iter Integer; number of times to repeat the cross-validation.
+##' @param fold Integer; number of folds for cross-validation (required if `method = "cluster"`).
 ##' @param n_size Optional; the size of the test set, required if `method = "regularized"`.
-##' @param control_sim Control settings for simulation as output from `set_control_sim`.
+##' @param control_sim Control settings for simulation, an output from `set_control_sim`.
 ##' @param method Character; either `"cluster"` or `"regularized"` for the cross-validation method. The `"cluster"` method uses
-##' the spatial clustering as implented by \code{\link{spatial_clustering_cv}} functoin from the `spatialEco` package; the `"regularized"` method
-##' select a subsample of the data-set by imposing a minimum distance - as set in the argument `min_dist` - for a randomly selected
+##' spatial clustering as implemented by the \code{\link{spatial_clustering_cv}} function from the `spatialEco` package, while the `"regularized"` method
+##' selects a subsample of the dataset by imposing a minimum distance, set by the `min_dist` argument, for a randomly selected
 ##' subset of locations.
-##' @param min_dist Optional; minimum distance for regularized subsampling, required if `method = "regularized"`.
+##' @param min_dist Optional; minimum distance for regularized subsampling (required if `method = "regularized"`).
 ##' @param plot_fold Logical; if `TRUE`, plots each fold's test set.
 ##' @param messages Logical; if `TRUE`, displays progress messages.
-##' @param which_metric Character; either `"crps"` or `"scrps"` to specify scoring rule.
+##' @param which_metric Character; either `"crps"` or `"scrps"` to specify the scoring rule.
 ##' @param ... Additional arguments passed to clustering or subsampling functions.
 ##'
 ##' @return A list of class `RiskMap.spatial.cv`, containing:
-##'   - `crps` or `scrps`: Computed scores for each fold.
-##'   - `refit`: A list of re-fitted models for each fold.
+##'   - `score`: A list with either `crps` or `scrps` scores for each fold, depending on `which_metric`.
+##'   - `refit`: A list of re-fitted models for each fold if `keep_par_fixed = FALSE`.
 ##'
 ##' @seealso \code{\link{spatial_clustering_cv}}, \code{\link{subsample.distance}}
 ##'
+##' @references Bolin, D., & Wallin, J. (2023). Local scale invariance and robustness of proper scoring rules. *Statistical Science*, 38(1), 140–159. \doi{10.1214/22-STS864}.
 ##' @importFrom terra match
 ##' @importFrom ggplot2 ggplot geom_sf theme_minimal ggtitle
 ##' @importFrom gridExtra grid.arrange
 ##' @importFrom stats ecdf integrate rbinom rpois
 ##' @importFrom spatialEco subsample.distance
 ##' @importFrom spatialsample spatial_clustering_cv autoplot
-##'
-##'
 ##' @importFrom sf st_as_sfc
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @export
-
+##' @author Emanuele Giorgi
 score_models <- function(object,
                         keep_par_fixed = TRUE,
-                        fold, n_size=NULL,
+                        iter = 1,
+                        fold = NULL, n_size=NULL,
                         control_sim = set_control_sim(),
                         method, min_dist = NULL,
                         plot_fold = TRUE,
@@ -1057,6 +1056,13 @@ score_models <- function(object,
     }
   }
 
+  if(method=="cluster") {
+    if(is.null(fold)) {
+      stop("if method='cluster' the number of folds must be specified
+           through the argument 'fold'")
+    }
+  }
+
   if(any(which_metric == "crps")) {
     get_crps <- TRUE
   } else {
@@ -1084,10 +1090,11 @@ score_models <- function(object,
   if(method=="cluster") {
     data_split <-
       spatial_clustering_cv(data = data_sf,
-                            v = fold, ...)
+                            v = fold,
+                            repeats = iter,...)
   } else if(method=="regularized") {
     data_split <- list(splits = list())
-    for(i in 1:fold) {
+    for(i in 1:iter) {
       data_split$splits[[i]] <- list()
       data_split$splits[[i]]$data_test <- subsample.distance(data_sf, size = n_size,
                             d = min_dist*1000,...)
@@ -1095,6 +1102,11 @@ score_models <- function(object,
       data_split$splits[[i]]$in_id <- (1:nrow(data_sf))[-data_split$splits[[i]]$out_id]
       data_split$splits[[i]]$data <- data_sf[data_split$splits[[i]]$in_id,]
     }
+  }
+  if(method=="cluster") {
+    n_iter <- iter*fold
+  } else {
+    n_iter <- iter
   }
 
   if(plot_fold) {
@@ -1108,11 +1120,11 @@ score_models <- function(object,
           ggtitle(paste("Subset no.",fold_no))
       }
       plots <- list()
-      for(i in 1:fold) {
+      for(i in 1:n_iter) {
         plots[[i]] <- create_plot(data_split$splits[[i]]$data_test,
                                   i)
       }
-      if(fold > 1) {
+      if(n_iter > 1) {
         grid.arrange(grobs = plots, ncol = 2)
       } else {
         print(plots)
@@ -1131,7 +1143,7 @@ score_models <- function(object,
 
     refit <- list()
 
-    for(i in 1:fold) {
+    for(i in 1:n_iter) {
       new_data_i <- data_sf[data_split$splits[[i]]$in_id,]
       if(!keep_par_fixed) {
         message("\n Re-estimating the model for the Subset no. ",i,"\n")
@@ -1194,7 +1206,8 @@ score_models <- function(object,
       y_crps <- list()
       scrps <- list()
     }
-    for(i in 1:fold) {
+
+    for(i in 1:n_iter) {
 
       data_sf_i <- object[[h]]$data_sf[-data_split$splits[[i]]$in_id,]
       if(!is.null(object[[h]]$cov_offset)) {
