@@ -1289,7 +1289,6 @@ glgpm_sim <- function(n_sim,
                       cov_offset = NULL,
                       crs = NULL, convert_to_crs = NULL,
                       scale_to_km = TRUE,
-                      control_mcmc = NULL,
                       sim_pars = list(beta = NULL,
                                       sigma2 = NULL,
                                       tau2 = NULL,
@@ -1309,11 +1308,6 @@ glgpm_sim <- function(n_sim,
     scale_to_km <- model_fit$scale_to_km
   }
   inter_f <- interpret.formula(formula)
-
-  if(family=="binomial" | family=="poisson") {
-    if(is.null(control_mcmc)) stop("if family='binomial' or family='poisson'
-                                   'control_mcmc' must be provided")
-  }
 
   if(!inherits(formula,
                what = "formula", which = FALSE)) {
@@ -1414,39 +1408,31 @@ glgpm_sim <- function(n_sim,
   p <- ncol(D)
 
   if(!is.null(model_fit)) {
-    ind_beta <- 1:p
     par_hat <- coef(model_fit)
 
-    beta <- par_hat[ind_beta]
-    ind_sigma2 <- p+1
-    sigma2 <- par_hat[ind_sigma2]
-    ind_phi <- p+2
-    phi <- par_hat[ind_phi]
+    beta <- par_hat$beta
+    sigma2 <- par_hat$sigma2
+    phi <- par_hat$phi
 
     if(is.null(model_fit$fix_tau2)) {
-      ind_tau2 <- p+3
-      tau2 <- par_hat[ind_tau2]
+      tau2 <- par_hat$tau2
       if(is.null(model_fit$fix_var_me)) {
-        ind_sigma2_me <- p+4
-        sigma2_me <- par_hat[ind_sigma2_me]
+        sigma2_me <- par_hat$sigma2_me
       } else {
         sigma2_me <- model_fit$fix_var_me
       }
       if(n_re>0) {
-        ind_sigma2_re <- (p+5):(p+4+n_re)
-        sigma2_re <- par_hat[ind_sigma2_re]
+        sigma2_re <- par_hat$sigma2_me
       }
     } else {
       tau2 <- model_fit$fix_tau2
       if(is.null(model_fit$fix_var_me)) {
-        ind_sigma2_me <- p+3
-        sigma2_me <- par_hat[ind_sigma2_me]
+        sigma2_me <- par_hat$sigma2_me
       } else {
         sigma2_me <- model_fit$fix_var_me
       }
       if(n_re>0) {
-        ind_sigma2_re <- (p+4):(p+3+n_re)
-        sigma2_re <- par_hat[ind_sigma2_re]
+        sigma2_re <- par_hat$sigma2_re
       }
     }
   } else {
@@ -1490,9 +1476,10 @@ glgpm_sim <- function(n_sim,
 
 
 
-  if(all(table(ID_coords)==1) & (tau2!=0 & sigma2_me!=0)) {
-    stop("When there is only one observation per location, both the nugget and measurement error cannot
-         be estimate. Consider removing either one of them. ")
+  if(all(table(ID_coords)==1) & !is.null(tau2) &
+     !is.null(sigma2_me) && (tau2!=0 & sigma2_me!=0)) {
+    warning("When there is only one observation per location, both the nugget and measurement error cannot
+         be estimated. Consider removing either one of them. ")
   }
 
   if(scale_to_km) {
@@ -1541,10 +1528,9 @@ glgpm_sim <- function(n_sim,
 
   y_sim <- matrix(NA, nrow=n_sim, ncol=n)
   if(family=="gaussian") {
-    lin_pred <- eta_sim
 
     for(i in 1:n_sim) {
-      y_sim[i,] <- lin_pred[i,] + sqrt(sigma2_me)*rnorm(n)
+      y_sim[i,] <- eta_sim[i,] + sqrt(sigma2_me)*rnorm(n)
     }
   }
 
@@ -1559,7 +1545,7 @@ glgpm_sim <- function(n_sim,
   }
   out <- list(data_sim = data_sim,
               S_sim = S_sim,
-              lin_pred_sim = lin_pred,
+              lin_pred_sim = eta_sim,
               beta = beta,
               sigma2 = sigma2,
               tau2 = tau2,
