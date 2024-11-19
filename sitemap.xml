@@ -6,6 +6,7 @@
 <url><loc>https://claudiofronterre.github.io/RiskMap/index.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/Laplace_sampling_MCMC.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/anopheles.html</loc></url>
+<url><loc>https://claudiofronterre.github.io/RiskMap/reference/assess_pp.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/check_mcmc.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/coef.RiskMap.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/compute_ID_coords.html</loc></url>
@@ -28,6 +29,7 @@
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/maxim.integrand.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/plot.RiskMap_pred_target_grid.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/plot.RiskMap_pred_target_shp.html</loc></url>
+<url><loc>https://claudiofronterre.github.io/RiskMap/reference/plot_AnPIT.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/plot_s_variogram.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/pred_over_grid.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/pred_target_grid.html</loc></url>
@@ -37,7 +39,6 @@
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/propose_utm.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/re.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/s_variogram.html</loc></url>
-<url><loc>https://claudiofronterre.github.io/RiskMap/reference/score_models.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/set_control_sim.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/summary.RiskMap.html</loc></url>
 <url><loc>https://claudiofronterre.github.io/RiskMap/reference/summary.RiskMap.spatial.cv.html</loc></url>
