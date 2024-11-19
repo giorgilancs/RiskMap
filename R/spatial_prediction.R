@@ -994,11 +994,11 @@ update_predictors <- function(object,
 ##' @param min_dist Optional; minimum distance for regularized subsampling (required if `method = "regularized"`).
 ##' @param plot_fold Logical; if `TRUE`, plots each fold's test set.
 ##' @param messages Logical; if `TRUE`, displays progress messages.
-##' @param which_metric Character; either `"crps"` or `"scrps"` to specify the scoring rule.
+##' @param which_metric Character; either `"CRPS"` or `"SCRPS"` to specify the scoring rule.
 ##' @param ... Additional arguments passed to clustering or subsampling functions.
 ##'
 ##' @return A list of class `RiskMap.spatial.cv`, containing:
-##'   - `score`: A list with either `crps` or `scrps` scores for each fold, depending on `which_metric`.
+##'   - `score`: A list with either `CRPS` or `SCRPS` scores for each fold, depending on `which_metric`.
 ##'   - `refit`: A list of re-fitted models for each fold if `keep_par_fixed = FALSE`.
 ##'
 ##' @seealso \code{\link{spatial_clustering_cv}}, \code{\link{subsample.distance}}
@@ -1013,7 +1013,7 @@ update_predictors <- function(object,
 ##' @importFrom sf st_as_sfc
 ##' @export
 ##' @author Emanuele Giorgi
-score_models <- function(object,
+assess_pp <- function(object,
                         keep_par_fixed = TRUE,
                         iter = 1,
                         fold = NULL, n_size=NULL,
@@ -1021,7 +1021,7 @@ score_models <- function(object,
                         method, min_dist = NULL,
                         plot_fold = TRUE,
                         messages = TRUE,
-                        which_metric = "crps",
+                        which_metric = c("AnPIT","CRPS", "SCRPS"),
                         ...) {
   is_list_of_riskmap <- function(object) {
     # Check if the object is a list
@@ -1037,8 +1037,8 @@ score_models <- function(object,
          an output of the function 'glgpm'")
   }
 
-  if (!all(which_metric %in% c("crps", "scrps"))) {
-    stop("'which_metric' must only contain 'crps' or 'scrps'")
+  if (!all(which_metric %in% c("CRPS", "SCRPS", "AnPIT"))) {
+    stop("'which_metric' must only contain 'CRPS', 'SCRPS' or 'AnPIT'")
   }
 
   if(method != "cluster" & method != "regularized") {
@@ -1063,16 +1063,20 @@ score_models <- function(object,
     }
   }
 
-  if(any(which_metric == "crps")) {
-    get_crps <- TRUE
-  } else {
-    get_crps <- FALSE
+  get_CRPS <- FALSE
+  get_SCRPS <- FALSE
+  get_AnPIT <- FALSE
+
+  if(any(which_metric == "CRPS")) {
+    get_CRPS <- TRUE
   }
 
-  if(any(which_metric == "scrps")) {
-    get_scrps <- TRUE
-  } else {
-    get_scrps <- FALSE
+  if(any(which_metric == "SCRPS")) {
+    get_SCRPS <- TRUE
+  }
+
+  if(any(which_metric == "AnPIT")) {
+    get_AnPIT <- TRUE
   }
 
   if(!inherits(control_sim,
@@ -1136,7 +1140,7 @@ score_models <- function(object,
   model_names <- names(object)
   out <- list()
   for(h in 1:n_models) {
-    # data_split <-     spatial_clustering_cv(data = data_sf, v = fold)
+
     par_hat <- coef(object[[h]])
     den_name <- as.character(object[[h]]$call$den)
     if(object[[h]]$cov_offset==0) object[[h]]$cov_offset <- NULL
@@ -1199,12 +1203,32 @@ score_models <- function(object,
     } else {
       i_co <- TRUE
     }
-    if(get_crps) {
-      crps <- list()
+
+    if(get_CRPS) {
+      CRPS <- list()
     }
-    if(get_scrps) {
-      y_crps <- list()
-      scrps <- list()
+
+    if(get_SCRPS) {
+      y_CRPS <- list()
+      SCRPS <- list()
+    }
+
+    if(get_AnPIT) {
+      AnPIT <- list()
+      u_val <- seq(0,1,length=1000)
+      compute_npit <- function(y, u, cdf_func) {
+        f_y_minus_1 <- cdf_func(y - 1)
+        f_y <- cdf_func(y)
+
+        if (u <= f_y_minus_1) {
+          return(0)
+        } else if (u <= f_y) {
+          return((u - f_y_minus_1) / (f_y - f_y_minus_1))
+        } else {
+          return(1)
+        }
+      }
+      compute_npit <- Vectorize(compute_npit, "u")
     }
 
     for(i in 1:n_iter) {
@@ -1239,48 +1263,65 @@ score_models <- function(object,
       units_m_i <- object[[h]]$units_m[-data_split$splits[[i]]$in_id]
       y_i <- object[[h]]$y[-data_split$splits[[i]]$in_id]
 
-      if(get_crps) {
-        crps[[i]] <- rep(NA, n_pred)
+      if(get_CRPS) {
+        CRPS[[i]] <- rep(NA, n_pred)
       }
-      if(get_scrps) {
-        y_crps[[i]] <- rep(NA, n_pred)
-        scrps[[i]] <- rep(NA, n_pred)
+      if(get_SCRPS) {
+        y_CRPS[[i]] <- rep(NA, n_pred)
+        SCRPS[[i]] <- rep(NA, n_pred)
       }
+
+      if(get_AnPIT) {
+        AnPIT_i <- matrix(NA, nrow = length(u_val),
+                                 ncol = n_pred)
+        AnPIT[[i]] <- rep(NA, length(u_val))
+      }
+
       for(j in 1:n_pred) {
         if(object[[h]]$family == "binomial") {
           y_samples <- rbinom(n_samples, units_m_i[j], prob = f_glm_samples[j,])
-        } else {
+        } else if(object[[h]]$family == "poisson") {
           y_samples <- rpois(n_samples, lambda = units_m_i[j]*f_glm_samples[j,])
         }
         F_list[[j]] <- ecdf(y_samples)
-        if(object[[h]]$family=="binomial") {
+        if(object[[h]]$family=="binomial" | object[[h]]$family=="poisson") {
+
           F_list_j <- function(x) F_list[[j]](x*units_m_i[j])
 
-          if(get_crps) {
-            crps[[i]][j] <- integrate(function(x) -(F_list_j(x)-1*(x>=y_i[j]/units_m_i[j]))^2,
+          if(get_CRPS) {
+            CRPS[[i]][j] <- integrate(function(x) -(F_list_j(x)-1*(x>=y_i[j]/units_m_i[j]))^2,
                                       lower = 0, upper = 1,
                                       subdivisions = 10000)$value
           }
 
-          if(get_scrps) {
-            y_crps[[i]][j] <- mean(sapply(y_samples,
+          if(get_SCRPS) {
+            y_CRPS[[i]][j] <- mean(sapply(y_samples,
                                           function(y) integrate(function(x)
                                             -(F_list_j(x)-1*(x>=y/units_m_i[j]))^2,
                                             lower = 0, upper = 1,
                                             subdivisions = 10000)$value))
-            scrps[[i]][j] <- -0.5*(1+crps[[i]][j]/y_crps[[i]][j]+
-                                     log(2*abs(y_crps[[i]][j])))
+            SCRPS[[i]][j] <- -0.5*(1+CRPS[[i]][j]/y_CRPS[[i]][j]+
+                                     log(2*abs(y_CRPS[[i]][j])))
+          }
+
+          if(get_AnPIT) {
+            AnPIT_i[,j] <- compute_npit(y_i[j], u_val, F_list[[j]])
           }
         }
       }
+      AnPIT[[i]] <- apply(AnPIT_i, 1, mean)
     }
     out[[paste(model_names[h])]] <- list(score = list())
-    if(get_crps) {
-      out[[paste(model_names[h])]]$score$crps <- crps
+    if(get_CRPS) {
+      out[[paste(model_names[h])]]$score$CRPS <- CRPS
     }
 
-    if(get_scrps) {
-      out[[paste(model_names[h])]]$score$scrps <- scrps
+    if(get_SCRPS) {
+      out[[paste(model_names[h])]]$score$SCRPS <- SCRPS
+    }
+
+    if(get_AnPIT) {
+      out[[paste(model_names[h])]]$AnPIT <- AnPIT
     }
     out[[paste(model_names[h])]]$refit <- refit
   }

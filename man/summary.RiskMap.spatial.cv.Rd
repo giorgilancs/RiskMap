@@ -8,7 +8,7 @@
 }
 \arguments{
 \item{object}{A `RiskMap.spatial.cv` object containing cross-validation scores for each
-model. This obtained as an output from \code{\link{score_models}}.}
+model. This obtained as an output from \code{\link{assess_pp}}.}
 
 \item{...}{Additional arguments passed to or from other methods.}
 }
@@ -18,7 +18,7 @@ A matrix of summary scores with models as rows and metrics as columns,
 }
 \description{
 This function provides a summary of cross-validation scores for different spatial models
-obtained as an output from \code{\link{score_models}}.
+obtained as an output from \code{\link{assess_pp}}.
 }
 \details{
 The function computes a matrix where rows correspond to models and columns correspond
@@ -26,7 +26,7 @@ to performance metrics (e.g., CRPS, SCRPS). The scores are weighted by subset si
 to provide an average score across subsets for each model and metric.
 }
 \seealso{
-\code{\link{score_models}}
+\code{\link{assess_pp}}
 }
 \author{
 Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}

@@ -147,7 +147,7 @@ glgpm <- function(formula,
   if(nong) {
     do_name <- deparse(substitute(den))
     if(do_name=="NULL") {
-      units_m <- 1
+      units_m <- rep(1, nrow(data))
       if(family=="binomial") warning("'den' is assumed to be 1 for all observations \n")
     } else {
       units_m <- data[[do_name]]
@@ -1265,7 +1265,6 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
 ##' @param crs Coordinate reference system (CRS) code for spatial data.
 ##' @param convert_to_crs CRS code to convert spatial data if different from 'crs'.
 ##' @param scale_to_km Logical; if TRUE, distances between locations are computed in kilometers; if FALSE, in meters.
-##' @param control_mcmc Control parameters for MCMC simulation if applicable.
 ##' @param sim_pars List of simulation parameters including 'beta', 'sigma2', 'tau2', 'phi', 'sigma2_me', and 'sigma2_re'.
 ##' @param messages Logical; if TRUE, display progress and informative messages.
 ##'

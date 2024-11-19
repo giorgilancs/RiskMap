@@ -15,7 +15,6 @@ glgpm_sim(
   crs = NULL,
   convert_to_crs = NULL,
   scale_to_km = TRUE,
-  control_mcmc = NULL,
   sim_pars = list(beta = NULL, sigma2 = NULL, tau2 = NULL, phi = NULL, sigma2_me = NULL,
     sigma2_re = NULL),
   messages = TRUE
@@ -42,8 +41,6 @@ For the 'poisson' family, the argument is optional and is used a multiplicative 
 \item{convert_to_crs}{CRS code to convert spatial data if different from 'crs'.}
 
 \item{scale_to_km}{Logical; if TRUE, distances between locations are computed in kilometers; if FALSE, in meters.}
-
-\item{control_mcmc}{Control parameters for MCMC simulation if applicable.}
 
 \item{sim_pars}{List of simulation parameters including 'beta', 'sigma2', 'tau2', 'phi', 'sigma2_me', and 'sigma2_re'.}
 

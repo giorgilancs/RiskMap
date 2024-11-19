@@ -728,10 +728,10 @@ compute_ID_coords <- function(data_sf) {
 ##' Summarize Cross-Validation Scores for Spatial RiskMap Models
 ##'
 ##' This function provides a summary of cross-validation scores for different spatial models
-##' obtained as an output from \code{\link{score_models}}.
+##' obtained as an output from \code{\link{assess_pp}}.
 ##'
 ##' @param object A `RiskMap.spatial.cv` object containing cross-validation scores for each
-##'               model. This obtained as an output from \code{\link{score_models}}.
+##'               model. This obtained as an output from \code{\link{assess_pp}}.
 ##' @param ...    Additional arguments passed to or from other methods.
 ##'
 ##' @details
@@ -743,7 +743,7 @@ compute_ID_coords <- function(data_sf) {
 ##'         with class `"summary.RiskMap.spatial.cv"`.
 ##'
 ##'
-##' @seealso \code{\link{score_models}}
+##' @seealso \code{\link{assess_pp}}
 ##'
 ##' @export
 ##' @method summary RiskMap.spatial.cv
@@ -837,4 +837,113 @@ print.summary.RiskMap.spatial.cv <- function(x, ...) {
   cat("-----------------------\n")
 }
 
+##' Plot AnPIT Results from Model Validation
+##'
+##' This function plots AnPIT results from a `RiskMap.spatial.cv` object obtained using the `assess_pp` function.
+##'
+##' @param object A `RiskMap.spatial.cv` object containing validation results.
+##' @param mode Character string specifying the mode of plotting: `"average"` (average AnPIT across test sets),
+##' `"single"` (AnPIT for a specific test set), or `"all"` (all test sets).
+##' @param test_set Integer specifying the test set to plot when `mode = "single"`.
+##' @param model_name Character string specifying the name of the model to plot. If `NULL`, all models are plotted.
+##'
+##' @return A ggplot2 plot or a grid of plots.
+##' @importFrom ggplot2 ggplot aes geom_line geom_abline labs theme_minimal guides guide_legend
+##' @importFrom ggpubr ggarrange
+##' @importFrom dplyr filter group_by summarize %>%
+##' @export
+plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = NULL) {
+  if (!inherits(object, "RiskMap.spatial.cv")) {
+    stop("`object` must be a 'Riskmap.spatial.cv' object obtained as an output from the function 'assess_pp'")
+  }
 
+  if (is.null(object[[1]]$AnPIT)) {
+    stop("The AnPIT was not computed when running the 'assess_pp' function")
+  }
+
+  # Ensure model_name matches an existing model
+  if (!is.null(model_name)) {
+    if (!model_name %in% names(object)) {
+      stop(paste("Model name", model_name, "not found in the provided object."))
+    }
+    object <- list(model_name = object[[model_name]])
+    names(object) <- model_name
+  }
+
+  # Create a data frame for plotting
+  plot_data <- do.call(rbind, lapply(seq_along(object), function(i) {
+    AnPIT_list <- object[[i]]$AnPIT
+    model_name <- names(object)[i]
+    do.call(rbind, lapply(seq_along(AnPIT_list), function(j) {
+      test_set_data <- AnPIT_list[[j]]
+      if (length(test_set_data) == 0) return(NULL)
+      data.frame(
+        u_val = seq(0, 1, length.out = length(test_set_data)),
+        AnPIT = test_set_data,
+        test_set = j,
+        model = model_name
+      )
+    }))
+  }))
+
+  # Ensure plot_data is valid
+  if (is.null(plot_data) || nrow(plot_data) == 0) {
+    stop("No valid AnPIT data available for plotting.")
+  }
+
+  # Handle the 'mode' argument and create plots
+  plots <- list()
+  id_line <- geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red")
+  for (model_id in unique(plot_data$model)) {
+    model_data <- plot_data %>% filter(model == model_id)
+    u_val <- NULL
+    model <- NULL
+    AnPIT <- NULL
+    if (mode == "average") {
+      avg_data <- model_data %>%
+        group_by(u_val) %>%
+        summarize(AnPIT = mean(AnPIT, na.rm = TRUE), .groups = 'drop')
+      p <- ggplot(avg_data, aes(x = u_val, y = AnPIT)) +
+        geom_line() +
+        labs(title = paste("Model", model_id, "- Average AnPIT"), x = "", y = "AnPIT") +
+        theme_minimal()
+
+    } else if (mode == "single") {
+      if (is.null(test_set)) {
+        stop("`test_set` must be provided when `mode` is 'single'")
+      }
+      model_data <- model_data %>% filter(test_set == !!test_set)
+
+      if (nrow(model_data) == 0) {
+        stop(paste("No data available for test_set:", test_set, "in model", model_id))
+      }
+
+      # Properly filter and plot only the selected test set
+      p <- ggplot(model_data, aes(x = u_val, y = AnPIT)) +
+        geom_line(color = "blue") +  # Added color to make the line more visible
+        labs(title = paste("Model", model_id, "- Test Set:", test_set), x = "", y = "AnPIT") +
+        theme_minimal()
+
+    } else if (mode == "all") {
+      p <- ggplot(model_data, aes(x = u_val, y = AnPIT, color = as.factor(test_set))) +
+        geom_line() +
+        labs(title = paste("Model", model_id, "- All Test Sets"), x = "", y = "AnPIT") +
+        theme_minimal() +
+        guides(color = guide_legend(title = "Test Set"))
+
+    } else {
+      stop("Invalid `mode`. Use 'average', 'single', or 'all'.")
+    }
+
+    p <- p + id_line
+    plots[[model_id]] <- p
+  }
+
+  # Combine plots into a grid with dynamic layout
+  n_plots <- length(plots)
+  ncol <- ifelse(n_plots == 1, 1, 2)
+  nrow <- ceiling(n_plots / ncol)
+  grid_plot <- ggpubr::ggarrange(plotlist = plots, ncol = ncol, nrow = nrow)
+
+  return(grid_plot)
+}
