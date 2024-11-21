@@ -836,23 +836,23 @@ print.summary.RiskMap.spatial.cv <- function(x, ...) {
 
   cat("-----------------------\n")
 }
-
-##' Plot AnPIT Results from Model Validation
+##' @title Plot AnPIT Results from Model Validation
 ##'
-##' This function plots AnPIT results from a `RiskMap.spatial.cv` object obtained using the `assess_pp` function.
+##' @description This function plots AnPIT results from a `RiskMap.spatial.cv` object obtained using the `assess_pp` function.
 ##'
 ##' @param object A `RiskMap.spatial.cv` object containing validation results.
 ##' @param mode Character string specifying the mode of plotting: `"average"` (average AnPIT across test sets),
 ##' `"single"` (AnPIT for a specific test set), or `"all"` (all test sets).
 ##' @param test_set Integer specifying the test set to plot when `mode = "single"`.
 ##' @param model_name Character string specifying the name of the model to plot. If `NULL`, all models are plotted.
+##' @param combine_panels Logical specifying whether to combine all models into a single plot when `mode = "average"`. Defaults to `FALSE`.
 ##'
 ##' @return A ggplot2 plot or a grid of plots.
 ##' @importFrom ggplot2 ggplot aes geom_line geom_abline labs theme_minimal guides guide_legend
 ##' @importFrom ggpubr ggarrange
 ##' @importFrom dplyr filter group_by summarize %>%
 ##' @export
-plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = NULL) {
+plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = NULL, combine_panels = FALSE) {
   if (!inherits(object, "RiskMap.spatial.cv")) {
     stop("`object` must be a 'Riskmap.spatial.cv' object obtained as an output from the function 'assess_pp'")
   }
@@ -891,14 +891,28 @@ plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = N
     stop("No valid AnPIT data available for plotting.")
   }
 
-  # Handle the 'mode' argument and create plots
-  plots <- list()
   id_line <- geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red")
+
+  if (mode == "average" && combine_panels) {
+    # Combine all models into a single plot
+    avg_data <- plot_data %>%
+      group_by(model, u_val) %>%
+      summarize(AnPIT = mean(AnPIT, na.rm = TRUE), .groups = 'drop')
+
+    p <- ggplot(avg_data, aes(x = u_val, y = AnPIT, color = model)) +
+      geom_line() +
+      labs(title = "Average AnPIT Across Models", x = "", y = "AnPIT") +
+      theme_minimal() +
+      guides(color = guide_legend(title = "Model")) +
+      id_line
+    return(p)
+  }
+
+  # Handle other modes or non-combined "average"
+  plots <- list()
   for (model_id in unique(plot_data$model)) {
     model_data <- plot_data %>% filter(model == model_id)
-    u_val <- NULL
-    model <- NULL
-    AnPIT <- NULL
+
     if (mode == "average") {
       avg_data <- model_data %>%
         group_by(u_val) %>%
@@ -918,9 +932,8 @@ plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = N
         stop(paste("No data available for test_set:", test_set, "in model", model_id))
       }
 
-      # Properly filter and plot only the selected test set
       p <- ggplot(model_data, aes(x = u_val, y = AnPIT)) +
-        geom_line(color = "blue") +  # Added color to make the line more visible
+        geom_line(color = "blue") +
         labs(title = paste("Model", model_id, "- Test Set:", test_set), x = "", y = "AnPIT") +
         theme_minimal()
 
@@ -939,7 +952,6 @@ plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = N
     plots[[model_id]] <- p
   }
 
-  # Combine plots into a grid with dynamic layout
   n_plots <- length(plots)
   ncol <- ifelse(n_plots == 1, 1, 2)
   nrow <- ceiling(n_plots / ncol)
