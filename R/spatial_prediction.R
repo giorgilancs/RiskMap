@@ -998,6 +998,8 @@ update_predictors <- function(object,
 ##' @param ... Additional arguments passed to clustering or subsampling functions.
 ##'
 ##' @return A list of class `RiskMap.spatial.cv`, containing:
+##'   - `test_set`: A list containing all the test sets used for the validation in
+##'   'sf' class.
 ##'   - `score`: A list with either `CRPS` or `SCRPS` scores for each fold, depending on `which_metric`.
 ##'   - `refit`: A list of re-fitted models for each fold if `keep_par_fixed = FALSE`.
 ##'
@@ -1138,7 +1140,7 @@ assess_pp <- function(object,
 
   n_models <- length(object)
   model_names <- names(object)
-  out <- list()
+  out <- list(test_set = list(), model = list())
   for(h in 1:n_models) {
 
     par_hat <- coef(object[[h]])
@@ -1234,6 +1236,7 @@ assess_pp <- function(object,
     for(i in 1:n_iter) {
 
       data_sf_i <- object[[h]]$data_sf[-data_split$splits[[i]]$in_id,]
+      out$test_set[[i]] <- data_sf_i
       if(!is.null(object[[h]]$cov_offset)) {
         pred_cov_offset_i <- object[[h]]$cov_offset[-data_split$splits[[i]]$in_id]
       } else {
@@ -1309,21 +1312,23 @@ assess_pp <- function(object,
           }
         }
       }
-      AnPIT[[i]] <- apply(AnPIT_i, 1, mean)
+      if(get_AnPIT) {
+        AnPIT[[i]] <- apply(AnPIT_i, 1, mean)
+      }
     }
-    out[[paste(model_names[h])]] <- list(score = list())
+    out$model[[paste(model_names[h])]] <- list(score = list())
     if(get_CRPS) {
-      out[[paste(model_names[h])]]$score$CRPS <- CRPS
+      out$model[[paste(model_names[h])]]$score$CRPS <- CRPS
     }
 
     if(get_SCRPS) {
-      out[[paste(model_names[h])]]$score$SCRPS <- SCRPS
+      out$model[[paste(model_names[h])]]$score$SCRPS <- SCRPS
     }
 
     if(get_AnPIT) {
-      out[[paste(model_names[h])]]$AnPIT <- AnPIT
+      out$model[[paste(model_names[h])]]$AnPIT <- AnPIT
     }
-    out[[paste(model_names[h])]]$refit <- refit
+    out$model[[paste(model_names[h])]]$refit <- refit
   }
 
   class(out) <- "RiskMap.spatial.cv"

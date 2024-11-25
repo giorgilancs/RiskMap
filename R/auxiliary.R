@@ -750,25 +750,27 @@ compute_ID_coords <- function(data_sf) {
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 summary.RiskMap.spatial.cv <- function(object,...) {
 
-  model_names <- names(object)
+  model_names <- names(object$model)
   n_models <- length(model_names)
 
-  metric_names <- names(object[[1]]$score)
+  metric_names <- names(object$model[[1]]$score)
+  if(is.null(metric_names)) stop("No metrics of predictive performance
+                                 where computed when running 'assess_pp'")
   n_metrics <- length(metric_names)
 
   res <- matrix(NA, ncol = n_metrics, nrow = n_models)
   colnames(res) <- metric_names
   rownames(res) <- model_names
 
-  n_subs <- length(object[[1]]$score[[1]])
+  n_subs <- length(object$model[[1]]$score[[1]])
 
-  w <- unlist(lapply(object[[1]]$score[[1]], length))
+  w <- unlist(lapply(object$model[[1]]$score[[1]], length))
 
   for(i in 1:n_models) {
     for(j in 1:n_metrics) {
       score_j <- rep(NA,n_subs)
       for(h in 1:n_subs) {
-        score_j[h] <- mean(object[[i]]$score[[j]][[h]])
+        score_j[h] <- mean(object$model[[i]]$score[[j]][[h]])
       }
       res[i,j] <- sum(w*score_j[h])/sum(w)
     }
@@ -857,23 +859,23 @@ plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = N
     stop("`object` must be a 'Riskmap.spatial.cv' object obtained as an output from the function 'assess_pp'")
   }
 
-  if (is.null(object[[1]]$AnPIT)) {
+  if (is.null(object$model[[1]]$AnPIT)) {
     stop("The AnPIT was not computed when running the 'assess_pp' function")
   }
 
   # Ensure model_name matches an existing model
   if (!is.null(model_name)) {
-    if (!model_name %in% names(object)) {
+    if (!model_name %in% names(object$model)) {
       stop(paste("Model name", model_name, "not found in the provided object."))
     }
-    object <- list(model_name = object[[model_name]])
+    object <- list(model_name = object$model[[model_name]])
     names(object) <- model_name
   }
 
   # Create a data frame for plotting
   plot_data <- do.call(rbind, lapply(seq_along(object), function(i) {
-    AnPIT_list <- object[[i]]$AnPIT
-    model_name <- names(object)[i]
+    AnPIT_list <- object$model[[i]]$AnPIT
+    model_name <- names(object$model)[i]
     do.call(rbind, lapply(seq_along(AnPIT_list), function(j) {
       test_set_data <- AnPIT_list[[j]]
       if (length(test_set_data) == 0) return(NULL)
@@ -959,3 +961,54 @@ plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = N
 
   return(grid_plot)
 }
+
+##' @title Plot Spatial Scores for a Specific Model and Metric
+##'
+##' @description This function visualizes spatial scores for a specified model and metric.
+##' It combines test set data, handles duplicate locations by averaging scores,
+##' and creates a customizable map using ggplot2.
+##'
+##' @param object A list containing test sets and model scores. The structure should include
+##'   `object$test_set` (list of sf objects) and `object$model[[which_model]]$score[[which_score]]`.
+##' @param which_score A string specifying the score to visualize. Must match a score computed in the model.
+##' @param which_model A string specifying the model whose scores to visualize.
+##' @param ... Additional arguments to customize ggplot, such as `scale_color_gradient` or `scale_color_manual`.
+##' @return A ggplot object visualizing the spatial distribution of the specified score.
+##' @export
+plot_score <- function(object, which_score, which_model, ...) {
+  # Check if "which_score" exists
+  if (!which_score %in% names(object$model[[which_model]]$score)) {
+    stop(paste("Error: The score", shQuote(which_score), "was not computed for model", shQuote(which_model)))
+  }
+
+  # Extract the test sets and number of test sets
+  test_sets <- object$test_set
+  n_test <- length(test_sets)
+
+  # Combine the data and add the score variable
+  data_full <- test_sets[[1]]
+  data_full$score <- object$model[[which_model]]$score[[which_score]][[1]]
+
+  if (n_test > 1) {
+    for (i in 1:n_test) {
+      test_sets[[i]]$score <- object$model[[which_model]]$score[[which_score]][[i]]
+      data_full <- rbind(data_full, test_sets[[i]])
+    }
+  }
+
+  # Check for duplicate locations and average the score
+  data_full <- data_full %>%
+    group_by(geometry) %>%
+    summarize(score = mean(score, na.rm = TRUE), .groups = "drop")
+
+  # Create the base plot
+  out <- ggplot(data = data_full) +
+    geom_sf(aes(color = score), size = 2) +
+    ggtitle(paste("Visualizing", which_score, "for model", which_model)) +
+    theme_minimal()
+
+
+  return(out)
+}
+
+
