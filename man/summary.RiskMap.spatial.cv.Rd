@@ -4,26 +4,34 @@
 \alias{summary.RiskMap.spatial.cv}
 \title{Summarize Cross-Validation Scores for Spatial RiskMap Models}
 \usage{
-\method{summary}{RiskMap.spatial.cv}(object, ...)
+\method{summary}{RiskMap.spatial.cv}(object, view_all = TRUE, ...)
 }
 \arguments{
 \item{object}{A `RiskMap.spatial.cv` object containing cross-validation scores for each
-model. This obtained as an output from \code{\link{assess_pp}}.}
+model, as obtained from \code{\link{assess_pp}}.}
+
+\item{view_all}{Logical. If `TRUE`, stores the average scores across test sets for each
+model alongside the overall average across all models. Defaults to `TRUE`.}
 
 \item{...}{Additional arguments passed to or from other methods.}
 }
 \value{
-A matrix of summary scores with models as rows and metrics as columns,
-        with class `"summary.RiskMap.spatial.cv"`.
+A matrix of summary scores with models as rows and metrics as columns, with class
+`"summary.RiskMap.spatial.cv"`.
 }
 \description{
-This function provides a summary of cross-validation scores for different spatial models
-obtained as an output from \code{\link{assess_pp}}.
+This function summarizes cross-validation scores for different spatial models obtained
+from \code{\link{assess_pp}}.
 }
 \details{
-The function computes a matrix where rows correspond to models and columns correspond
-to performance metrics (e.g., CRPS, SCRPS). The scores are weighted by subset sizes
-to provide an average score across subsets for each model and metric.
+The function computes and returns a matrix where rows correspond to models and columns
+correspond to performance metrics (e.g., CRPS, SCRPS). Scores are weighted by subset sizes
+to compute averages. Attributes of the returned object include:
+\itemize{
+  \item `test_set_means`: A list of average scores for each test set and model.
+  \item `overall_averages`: Overall averages for each metric across all models.
+  \item `view_all`: Indicates whether averages across test sets are available for visualization.
+}
 }
 \seealso{
 \code{\link{assess_pp}}

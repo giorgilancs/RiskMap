@@ -49,6 +49,8 @@ subset of locations.}
 }
 \value{
 A list of class `RiskMap.spatial.cv`, containing:
+  - `test_set`: A list containing all the test sets used for the validation in
+  'sf' class.
   - `score`: A list with either `CRPS` or `SCRPS` scores for each fold, depending on `which_metric`.
   - `refit`: A list of re-fitted models for each fold if `keep_par_fixed = FALSE`.
 }

@@ -4,7 +4,13 @@
 \alias{plot_AnPIT}
 \title{Plot AnPIT Results from Model Validation}
 \usage{
-plot_AnPIT(object, mode = "average", test_set = NULL, model_name = NULL)
+plot_AnPIT(
+  object,
+  mode = "average",
+  test_set = NULL,
+  model_name = NULL,
+  combine_panels = FALSE
+)
 }
 \arguments{
 \item{object}{A `RiskMap.spatial.cv` object containing validation results.}
@@ -15,6 +21,8 @@ plot_AnPIT(object, mode = "average", test_set = NULL, model_name = NULL)
 \item{test_set}{Integer specifying the test set to plot when `mode = "single"`.}
 
 \item{model_name}{Character string specifying the name of the model to plot. If `NULL`, all models are plotted.}
+
+\item{combine_panels}{Logical specifying whether to combine all models into a single plot when `mode = "average"`. Defaults to `FALSE`.}
 }
 \value{
 A ggplot2 plot or a grid of plots.

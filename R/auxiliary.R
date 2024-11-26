@@ -872,6 +872,11 @@ print.summary.RiskMap.spatial.cv <- function(x, ...) {
 ##' @importFrom dplyr filter group_by summarize %>%
 ##' @export
 plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = NULL, combine_panels = FALSE) {
+  # Initailize global variables
+  model <- NULL
+  u_val <- NULL
+  AnPIT <- NULL
+
   if (!inherits(object, "RiskMap.spatial.cv")) {
     stop("`object` must be a 'Riskmap.spatial.cv' object obtained as an output from the function 'assess_pp'")
   }
@@ -993,6 +998,9 @@ plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = N
 ##' @return A ggplot object visualizing the spatial distribution of the specified score.
 ##' @export
 plot_score <- function(object, which_score, which_model, ...) {
+  geometry <- NULL
+  score <- NULL
+
   # Check if "which_score" exists
   if (!which_score %in% names(object$model[[which_model]]$score)) {
     stop(paste("Error: The score", shQuote(which_score), "was not computed for model", shQuote(which_model)))
