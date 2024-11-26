@@ -725,56 +725,71 @@ compute_ID_coords <- function(data_sf) {
 }
 
 
-##' Summarize Cross-Validation Scores for Spatial RiskMap Models
+##' @title Summarize Cross-Validation Scores for Spatial RiskMap Models
 ##'
-##' This function provides a summary of cross-validation scores for different spatial models
-##' obtained as an output from \code{\link{assess_pp}}.
+##' @description This function summarizes cross-validation scores for different spatial models obtained
+##' from \code{\link{assess_pp}}.
 ##'
 ##' @param object A `RiskMap.spatial.cv` object containing cross-validation scores for each
-##'               model. This obtained as an output from \code{\link{assess_pp}}.
-##' @param ...    Additional arguments passed to or from other methods.
+##'               model, as obtained from \code{\link{assess_pp}}.
+##' @param view_all Logical. If `TRUE`, stores the average scores across test sets for each
+##'                 model alongside the overall average across all models. Defaults to `TRUE`.
+##' @param ... Additional arguments passed to or from other methods.
 ##'
 ##' @details
-##' The function computes a matrix where rows correspond to models and columns correspond
-##' to performance metrics (e.g., CRPS, SCRPS). The scores are weighted by subset sizes
-##' to provide an average score across subsets for each model and metric.
+##' The function computes and returns a matrix where rows correspond to models and columns
+##' correspond to performance metrics (e.g., CRPS, SCRPS). Scores are weighted by subset sizes
+##' to compute averages. Attributes of the returned object include:
+##' \itemize{
+##'   \item `test_set_means`: A list of average scores for each test set and model.
+##'   \item `overall_averages`: Overall averages for each metric across all models.
+##'   \item `view_all`: Indicates whether averages across test sets are available for visualization.
+##' }
 ##'
-##' @return A matrix of summary scores with models as rows and metrics as columns,
-##'         with class `"summary.RiskMap.spatial.cv"`.
-##'
+##' @return A matrix of summary scores with models as rows and metrics as columns, with class
+##' `"summary.RiskMap.spatial.cv"`.
 ##'
 ##' @seealso \code{\link{assess_pp}}
 ##'
 ##' @export
 ##' @method summary RiskMap.spatial.cv
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-summary.RiskMap.spatial.cv <- function(object,...) {
-
+summary.RiskMap.spatial.cv <- function(object, view_all = TRUE, ...) {
   model_names <- names(object$model)
   n_models <- length(model_names)
 
   metric_names <- names(object$model[[1]]$score)
-  if(is.null(metric_names)) stop("No metrics of predictive performance
-                                 where computed when running 'assess_pp'")
+  if (is.null(metric_names)) stop("No metrics of predictive performance were computed when running 'assess_pp'")
   n_metrics <- length(metric_names)
 
   res <- matrix(NA, ncol = n_metrics, nrow = n_models)
   colnames(res) <- metric_names
   rownames(res) <- model_names
 
-  n_subs <- length(object$model[[1]]$score[[1]])
+  test_set_means <- list()
 
+  n_subs <- length(object$model[[1]]$score[[1]])
   w <- unlist(lapply(object$model[[1]]$score[[1]], length))
 
-  for(i in 1:n_models) {
-    for(j in 1:n_metrics) {
-      score_j <- rep(NA,n_subs)
-      for(h in 1:n_subs) {
+  for (i in 1:n_models) {
+    model_scores <- list()
+    for (j in 1:n_metrics) {
+      score_j <- rep(NA, n_subs)
+      for (h in 1:n_subs) {
         score_j[h] <- mean(object$model[[i]]$score[[j]][[h]])
       }
-      res[i,j] <- sum(w*score_j[h])/sum(w)
+      model_scores[[j]] <- score_j
+      res[i, j] <- sum(w * score_j) / sum(w)
     }
+    test_set_means[[model_names[i]]] <- model_scores
   }
+
+  overall_averages <- colMeans(res, na.rm = TRUE)
+
+  # Attach additional attributes for printing
+  attr(res, "test_set_means") <- test_set_means
+  attr(res, "overall_averages") <- overall_averages
+  attr(res, "view_all") <- view_all
 
   class(res) <- "summary.RiskMap.spatial.cv"
   return(res)
@@ -800,44 +815,46 @@ summary.RiskMap.spatial.cv <- function(object,...) {
 ##' @export
 ##' @method print summary.RiskMap.spatial.cv
 print.summary.RiskMap.spatial.cv <- function(x, ...) {
-  # Convert x to data frame format
-  df <- matrix(x, ncol = ncol(x))
+  # Extract attributes
+  test_set_means <- attr(x, "test_set_means")
+  overall_averages <- attr(x, "overall_averages")
+  view_all <- attr(x, "view_all")
 
-  # Retrieve model and metric names
-  model_names <- rownames(x)
-  metric_names <- colnames(x)
+  cat("Summary of Cross-Validation Scores\n")
+  cat("----------------------------------\n")
 
-  # Print the header
-  cat("Summary of Model Scores\n")
-  cat("-----------------------\n")
+  for (model_name in names(test_set_means)) {
+    cat(sprintf("Model: %s\n", model_name))
 
-  # Column headers
-  cat(sprintf("%-20s", "Model"))
-  for (metric in metric_names) {
-    cat(sprintf("%-15s", toupper(metric)))
-  }
-  cat("\n")
+    if (view_all) {
+      # Print scores for each test set
+      model_test_set_means <- test_set_means[[model_name]]
+      n_test_sets <- length(model_test_set_means[[1]])  # Number of test sets (assumes all metrics have same length)
 
-  # Iterate through each model and metric, printing values
-  for (i in seq_len(nrow(df))) {
-    # Print model name or "Unknown Model" if missing
-    cat(sprintf("%-20s", ifelse(!is.na(model_names[i]), model_names[i], "Unknown Model")))
-
-    # Print each metric in the row, checking for NA or length issues
-    for (j in seq_len(ncol(df))) {
-      metric_value <- df[i, j]
-      # Check if metric_value is scalar and not NA
-      if (is.atomic(metric_value) && length(metric_value) == 1 && !is.na(metric_value)) {
-        cat(sprintf("%-15.4f", metric_value))
-      } else {
-        cat(sprintf("%-15s", "NA"))  # Print "NA" for missing or non-scalar values
+      for (test_set_idx in seq_len(n_test_sets)) {
+        cat(sprintf("  Test Set %d:\n", test_set_idx))
+        for (metric_idx in seq_along(model_test_set_means)) {
+          metric_name <- colnames(x)[metric_idx]
+          test_set_value <- model_test_set_means[[metric_idx]][test_set_idx]
+          cat(sprintf("    %s: %.4f\n", metric_name, test_set_value))
+        }
       }
+    }
+
+    # Print overall average across test sets for the model
+    cat("  Overall average across test sets:\n")
+    for (metric_idx in seq_along(overall_averages)) {
+      metric_name <- colnames(x)[metric_idx]
+      overall_avg <- x[model_name, metric_idx]
+      cat(sprintf("    %s: %.4f\n", metric_name, overall_avg))
     }
     cat("\n")
   }
-
-  cat("-----------------------\n")
 }
+
+
+
+
 ##' @title Plot AnPIT Results from Model Validation
 ##'
 ##' @description This function plots AnPIT results from a `RiskMap.spatial.cv` object obtained using the `assess_pp` function.
