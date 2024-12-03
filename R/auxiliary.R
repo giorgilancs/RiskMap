@@ -282,51 +282,65 @@ re <- function (...) {
   ret
 }
 
-
 interpret.formula <- function(formula) {
   p.env <- environment(formula)
   tf <- terms.formula(formula, specials = c("gp", "re"))
   terms <- attr(tf, "term.labels")
   nt <- length(terms)
+
   if (attr(tf, "response") > 0) {
     response <- as.character(attr(tf, "variables")[2])
   } else {
     response <- NULL
   }
+
   gp <- attr(tf, "specials")$gp
   re <- attr(tf, "specials")$re
   off <- attr(tf, "offset")
   vtab <- attr(tf, "factors")
-  if (length(gp) > 0)
+
+  if (length(gp) > 0) {
     for (i in 1:length(gp)) {
-      ind <- (1:nt)[as.logical(vtab[gp[i],])]
+      ind <- (1:nt)[as.logical(vtab[gp[i], ])]
       gp[i] <- ind
     }
-  if (length(re) > 0)
+  }
+
+  if (length(re) > 0) {
     for (i in 1:length(re)) {
-      ind <- (1:nt)[as.logical(vtab[re[i],])]
+      ind <- (1:nt)[as.logical(vtab[re[i], ])]
       re[i] <- ind
     }
+  }
+
   len.gp <- length(gp)
   len.re <- length(re)
-  ns <- len.gp + len.re
   gp.spec <- eval(parse(text = terms[gp]), envir = p.env)
   re.spec <- eval(parse(text = terms[re]), envir = p.env)
-  if(length(terms[-c(gp, re)])>0) {
+
+  if (length(off) > 0) {
+    offset <- as.character(attr(tf, "variables")[[off[i] + 1]])[2]
+  } else {
+    offset <- NULL
+  }
+
+  if (length(terms[-c(gp, re)]) > 0) {
     pf <- paste(response, "~", paste(terms[-c(gp, re)], collapse = " + "))
-  } else if (length(terms[-c(gp, re)])==0) {
+  } else if (length(terms[-c(gp, re)]) == 0) {
     pf <- paste(response, "~ 1")
   }
+
   if (attr(tf, "intercept") == 0) {
     pf <- paste(pf, "-1", sep = "")
   }
 
-  fake.formula <- pf
-  fake.formula <- as.formula(fake.formula, p.env)
-  ret <- list(pf = as.formula(pf, p.env),
-              gp.spec = gp.spec,
-              re.spec = re.spec,
-              response = response)
+  ret <- list(
+    pf = as.formula(pf, p.env),
+    gp.spec = gp.spec,
+    re.spec = re.spec,
+    offset = offset,
+    response = response
+  )
   ret
 }
 

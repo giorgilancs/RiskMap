@@ -56,7 +56,6 @@ glgpm <- function(formula,
                  data,
                  family,
                  den = NULL,
-                 cov_offset = NULL,
                  crs = NULL, convert_to_crs = NULL,
                  scale_to_km = TRUE,
                  control_mcmc = set_control_sim(),
@@ -134,13 +133,11 @@ glgpm <- function(formula,
 
   # Extract covariates matrix
   D <- as.matrix(model.matrix(attr(mf,"terms"),data=data))
-  if(is.null(cov_offset)) {
-    cov_offset <- 0
+
+  if(is.null(inter_f$offset)) {
+    cov_offset <- rep(0, nrow(data))
   } else {
-    if(!is.numeric(cov_offset)) stop("the variable passed to 'cov_offset'
-                                     must be numeric vector")
-    if(any(is.na(cov_offset))) stop("missing values not accepted in the offset")
-    if(length(cov_offset)!=n) stop("the offset values do not match the number of observations in the data")
+    cov_offset <- data[[inter_f$offset]]
   }
 
   # Define denominators for Binomial and Poisson distributions
@@ -215,7 +212,7 @@ glgpm <- function(formula,
     data <- st_transform(data, crs = convert_to_crs)
     crs <- convert_to_crs
   }
-  if(messages) message("The CRS used is", as.list(st_crs(data))$input, "\n")
+  if(messages) message("The CRS used is ", as.list(st_crs(data))$input, "\n")
 
   coords_o <- st_coordinates(data)
   coords <- unique(coords_o)
@@ -237,9 +234,9 @@ glgpm <- function(formula,
   if(scale_to_km) {
     coords_o <- coords_o/1000
     coords <- coords/1000
-    if(messages) message("Distances between locations are computed in kilometers \n")
+    if(messages) message("Distances between locations are computed in kilometers ")
   } else {
-    if(messages) message("Distances between locations are computed in meters \n")
+    if(messages) message("Distances between locations are computed in meters ")
   }
 
 
@@ -249,7 +246,7 @@ glgpm <- function(formula,
     } else if(family=="binomial") {
       aux_data <- data.frame(y=y, units_m = units_m, D[,-1])
       if(length(cov_offset)==1) cov_offset_aux <- rep(cov_offset, n)
-      glm_fitted <- glm(cbind(y, units_m - y) ~ ., offset = cov_offset_aux,
+      glm_fitted <- glm(cbind(y, units_m - y) ~ ., offset = cov_offset,
                         data = aux_data, family = binomial)
       start_pars$beta <- stats::coef(glm_fitted)
     } else if(family=="poisson") {
@@ -1989,6 +1986,7 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
 
     out <- as.numeric(-Sigma_w_inv%*%(W-mu_w)+
                    t(Sigma_pd_sroot)%*%grad_S_tot_r)
+
   }
 
   h <- control_mcmc$h
@@ -2006,9 +2004,13 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
   sim <- matrix(NA,nrow=n_samples, ncol=n_tot)
 
   if(messages) message("\n - Conditional simulation (burnin=",
-                     control_mcmc$burnin,", thin=",control_mcmc$thin,"): \n \n",sep="")
+                     control_mcmc$burnin,", thin=",control_mcmc$thin,"): \n ",sep="")
   h.vec <- rep(NA,n_sim)
   acc_prob <- rep(NA,n_sim)
+
+  # Progress bar dimensions
+  progress_bar_length <- 50
+
   for(i in 1:n_sim) {
     W_prop <- mean_curr+h*rnorm(n_tot)
     S_tot_prop <-  as.numeric(Sigma_pd_sroot%*%W_prop+mean_pd)
@@ -2036,8 +2038,24 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
     acc_prob[i] <- acc/i
     h.vec[i] <- h <- max(10e-20,h + c1.h*i^(-c2.h)*(acc/i-0.57))
 
+    # Update the progress bar
+    progress <- i / n_sim * 100
+    bar_length <- floor(progress / 100 * progress_bar_length)
+
+    # Construct the progress message
+    progress_message <- sprintf("\rProgress: [%-50s] %.2f%%",
+                                paste(rep("=", bar_length), collapse = ""),
+                                progress)
+
+    # Use cat() to write to stderr (equivalent to message())
+    cat(progress_message, file = stderr())
+
+    # Ensure output is flushed to console
+    flush.console()
+
   }
 
+  message("\n")
   out_sim <- list()
   out_sim$samples <- list()
   out_sim$samples$S <- sim[,1:n_loc]
@@ -2160,7 +2178,7 @@ function(y, D, coords, units_m, kappa,
   sigma2_re_0 <- par0$sigma2_re
 
 
-  if(messages) message("\n - Obtaining covariance matrix and mean for the proposal distribution of the MCMC \n \n")
+  if(messages) message("\n - Obtaining covariance matrix and mean for the proposal distribution of the MCMC \n")
   out_maxim <-
     maxim.integrand(y = y, units_m = units_m, Sigma = Sigma0, mu = mu0,
                     ID_coords = ID_coords, ID_re = ID_re,
