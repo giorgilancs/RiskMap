@@ -9,7 +9,6 @@ glgpm(
   data,
   family,
   den = NULL,
-  cov_offset = NULL,
   crs = NULL,
   convert_to_crs = NULL,
   scale_to_km = TRUE,
@@ -31,8 +30,6 @@ glgpm(
 \item{family}{A character string specifying the distribution of the response variable. Must be one of "gaussian", "binomial", or "poisson".}
 
 \item{den}{Optional offset for binomial or Poisson distributions. If not provided, defaults to 1 for binomial.}
-
-\item{cov_offset}{Optional numeric vector for covariate offset.}
 
 \item{crs}{Optional integer specifying the Coordinate Reference System (CRS) if data is not an sf object. Defaults to 4326 (long/lat).}
 

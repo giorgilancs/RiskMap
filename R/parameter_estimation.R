@@ -1,10 +1,14 @@
+##' @importFrom utils flush.console
+##' @importFrom graphics points
+##' @importFrom sf st_nearest_feature
+
+
 ##' @title Estimation of Generalized Linear Gaussian Process Models
 ##' @description Fits generalized linear Gaussian process models to spatial data, incorporating spatial Gaussian processes with a Matern correlation function. Supports Gaussian, binomial, and Poisson response families.
 ##' @param formula A formula object specifying the model to be fitted. The formula should include fixed effects, random effects (specified using \code{re()}), and spatial effects (specified using \code{gp()}).
 ##' @param data A data frame or sf object containing the variables in the model.
 ##' @param family A character string specifying the distribution of the response variable. Must be one of "gaussian", "binomial", or "poisson".
 ##' @param den Optional offset for binomial or Poisson distributions. If not provided, defaults to 1 for binomial.
-##' @param cov_offset Optional numeric vector for covariate offset.
 ##' @param crs Optional integer specifying the Coordinate Reference System (CRS) if data is not an sf object. Defaults to 4326 (long/lat).
 ##' @param convert_to_crs Optional integer specifying a CRS to convert the spatial coordinates.
 ##' @param scale_to_km Logical indicating whether to scale coordinates to kilometers. Defaults to TRUE.
@@ -1522,11 +1526,39 @@ glgpm_sim <- function(n_sim,
     }
   }
 
+  if(family!="gaussian") {
+    if(!is.null(den))  {
+      do_name <- deparse(substitute(den))
+      units_m <- data[[do_name]]
+
+      if(is.integer(units_m)) units_m <- as.numeric(units_m)
+      if(!is.numeric(units_m)) stop("the variable passed to `den` must be numeric")
+
+
+    } else {
+      units_m <- model_fit$units_m
+    }
+
+  }
+
   y_sim <- matrix(NA, nrow=n_sim, ncol=n)
   if(family=="gaussian") {
 
     for(i in 1:n_sim) {
       y_sim[i,] <- eta_sim[i,] + sqrt(sigma2_me)*rnorm(n)
+    }
+  } else {
+
+    if(family=="binomial") {
+      for(i in 1:n_sim) {
+        prob_i <- exp(eta_sim[i,])/(1+exp(eta_sim[i,]))
+        y_sim[i,] <- rbinom(n, size = units_m, prob = prob_i)
+      }
+    } else if(family=="poisson") {
+      for(i in 1:n_sim) {
+        mean_i <- exp(eta_sim[i,])/(1+exp(eta_sim[i,]))
+        y_sim[i,] <- rpois(n,lambda = units_m*mean_i)
+      }
     }
   }
 
