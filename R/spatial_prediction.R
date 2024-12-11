@@ -61,7 +61,7 @@ pred_over_grid <- function(object,
   par_hat <- coef(object)
   p <- ncol(object$D)
 
-  if(length(object$cov_offset) > 1) {
+  if(!all(length(object$cov_offset==0))) {
     if(is.null(pred_cov_offset)) {
       stop("The covariate offset must be specified at each of the prediciton
            locations.")
@@ -1544,6 +1544,7 @@ surf_sim <- function(n_sim, pred_grid,
   out$lp_grid_sim <- pred_grid
   out$par0 <- par0
   out$family <- family
+  class(out) <- "RiskMap.sim"
   return(out)
 }
 
@@ -1570,4 +1571,56 @@ plot_sim_surf <-  function(surf_obj, sim, ...) {
   plot(r, main = paste("Simulation no.", sim), ...)
   points(st_coordinates(surf_obj$data_sim[[sim]]), pch = 20)
 
+}
+
+assess_sim <- function(obj_sim,
+                       models,
+                       control_mcmc = set_control_sim(),
+                       type = "marginal",
+                       messages = TRUE) {
+
+  if(inherits(obj_sim,
+              what = "RiskMap.sim", which = FALSE)) {
+    stop("'obj_sim' must be an object of class 'RiskMap.sim' obtained
+         as an output from the 'surf_sim' function")
+  }
+
+  n_sim <- length(obj_sim$data_sim)
+  n_models <- length(models)
+
+  model_names <- names(models)
+
+
+  fits <- list()
+  preds <- list()
+  for(i in 1:n_models) {
+    if(messages) message("Model: ", paste(model_names[i]),"\n")
+
+    if_i <- interpret.formula(f_i)
+    rhs_terms <- attr(terms(if_i$pf), "term.labels")
+    # Check if there are any covariates
+    if (length(rhs_terms) == 0) {
+      predictors_i <- NULL
+    } else {
+      predictors_i <- obj_sim$lp_grid_sim
+    }
+    for(j in 1:n_sim) {
+      if(messages) message("Processing simulation no.", j)
+      f_i <- update(models[[i]], y ~ .)
+      if(messages) message("Estimation")
+      fits[[paste(model_names[i])]][[j]] <- glgpm(formula = f_i,
+                                                  den = units_m,
+                                                  family = obj_sim$family,
+                                                  data = obj_sim$data_sim[[j]],
+                                                  control_mcmc = control_mcmc,
+                                                  messages = FALSE)
+
+      if(messages) message("Prediction over the grid")
+      preds[[paste(model_names[i])]][[j]] <-
+        pred_over_grid(fits[[paste(model_names[i])]][[j]],
+                       grid_pred = st_as_sfc(obj_sim$lp_grid_sim),
+                       predictors = predictors_i,
+                       type = type, messages = FALSE)
+    }
+  }
 }
