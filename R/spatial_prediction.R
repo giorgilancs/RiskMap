@@ -1347,12 +1347,17 @@ assess_pp <- function(object,
 ##' @param scale_to_km A logical indicating whether the coordinates should be scaled to kilometers. Defaults to `TRUE`.
 ##' @param control_mcmc A list of control parameters for MCMC (not used in this implementation but can be expanded later).
 ##' @param par0 A list containing initial parameter values for the simulation, including `beta`, `sigma2`, `phi`, `tau2`, and `sigma2_me`.
+##' @param include_covariates A logical indicateing if the covariates (or the intercept if no covariates are used) should be included in the linear
+##' predictor. By default \code{include_covariates = TRUE}
 ##' @param nugget_over_grid A logical indicating whether to include a nugget effect over the entire prediction grid.
 ##' @param fix_var_me A parameter to fix the variance of the random effects for the measurement error. Defaults to `NULL`.
 ##' @param messages A logical value indicating whether to print messages during the simulation. Defaults to `TRUE`.
 ##'
-##' @return A list containing the simulated data (`data_sim`), the linear predictors (`lp_grid_sim`),
-##' the model parameters set for the simulation (`par0`) and the family used in the model (`family`).
+##' @return A list containing the simulated data (\code{data_sim}), the linear predictors (\code{lp_grid_sim}),
+##' a logical value indicating if covariates have been included in the linear predictor (\code{include_covariates}),
+##' a logical value indicating if the nugget has been included into the simulations of the linear predictor over the grid
+##' (\code{nugget_over_grid}), a logical  indicating if a covariate offset has been included in the linear predictor (\code{include_cov_offset}),
+##' the model parameters set for the simulation (\code{par0}) and the family used in the model (\code{family}).
 ##'
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @export
@@ -1362,6 +1367,7 @@ surf_sim <- function(n_sim, pred_grid,
                      scale_to_km = TRUE,
                      control_mcmc = set_control_sim(),
                      par0, nugget_over_grid = FALSE,
+                     include_covariates = TRUE,
                      fix_var_me = NULL,
                      messages = TRUE) {
 
@@ -1373,7 +1379,7 @@ surf_sim <- function(n_sim, pred_grid,
                                      model to be fitted")
   }
   inter_f <- interpret.formula(formula)
-
+  include_cov_offset <- !is.null(inter_f$offset)
   if(!inherits(pred_grid,
                what = c("sf", "data.frame"), which = FALSE)) {
     stop("'pred_grid' must be an 'sf'
@@ -1516,8 +1522,12 @@ surf_sim <- function(n_sim, pred_grid,
       S_sim_data <- S_sim_data + sqrt(tau2)*rnorm(n[[i]])
     }
     # Linear predictor
-    eta_sim_tot <- D_tot%*%beta +
-      c(S_sim_data, S_sim[[sim_column]])
+    if(include_covariates) {
+      eta_sim_tot <- D_tot%*%beta +
+        c(S_sim_data, S_sim[[sim_column]])
+    } else {
+      eta_sim_tot <- c(S_sim_data, S_sim[[sim_column]])
+    }
 
     data_sim[[i]]$y <- NA
 
@@ -1542,6 +1552,9 @@ surf_sim <- function(n_sim, pred_grid,
 
   out$data_sim <- data_sim
   out$lp_grid_sim <- pred_grid
+  out$include_covariates <- include_covariates
+  out$nugget_over_grid <- nugget_over_grid
+  out$include_cov_offset <- include_cov_offset
   out$par0 <- par0
   out$family <- family
   class(out) <- "RiskMap.sim"
@@ -1577,12 +1590,19 @@ assess_sim <- function(obj_sim,
                        models,
                        control_mcmc = set_control_sim(),
                        type = "marginal",
-                       messages = TRUE) {
+                       messages = TRUE,
+                       f_grid_target = NULL,
+                       f_area_target = NULL,
+                       pred_objective = c("mse","class","ep"),
+                       threshold = NULL) {
 
   if(inherits(obj_sim,
               what = "RiskMap.sim", which = FALSE)) {
     stop("'obj_sim' must be an object of class 'RiskMap.sim' obtained
          as an output from the 'surf_sim' function")
+  }
+  if (length(setdiff(pred_objective, c("mse","class","ep")))>0) {
+    stop(paste("Invalid value for pred_objective. Allowed values are:", paste(allowed_values, collapse = ", ")))
   }
 
   n_sim <- length(obj_sim$data_sim)
@@ -1590,13 +1610,16 @@ assess_sim <- function(obj_sim,
 
   model_names <- names(models)
 
+  include_covariates <- obj_sim$include_covariates
+  include_cov_offset <- obj_sim$include_cov_offset
+  include_nugget <- obj_sim$nugget_over_grid
 
   fits <- list()
   preds <- list()
   for(i in 1:n_models) {
     if(messages) message("Model: ", paste(model_names[i]),"\n")
 
-    if_i <- interpret.formula(f_i)
+    if_i <- interpret.formula(models[[i]])
     rhs_terms <- attr(terms(if_i$pf), "term.labels")
     # Check if there are any covariates
     if (length(rhs_terms) == 0) {
@@ -1623,4 +1646,103 @@ assess_sim <- function(obj_sim,
                        type = type, messages = FALSE)
     }
   }
+
+  n_samples <- (control_mcmc$n_sim-control_mcmc$burnin)/control_mcmc$thin
+  n_pred <- nrow(obj_sim$lp_grid_sim)
+
+
+  out <- list(pred_objective = list())
+
+  if(any(pred_objective=="mse")) {
+    out$pred_objective$mse <- array(NA, c(n_models, n_sim))
+    rownames(out$pred_objective$mse) <- model_names
+    colnames(out$pred_objective$mse) <- paste0("sim_",1:n_sim)
+  }
+
+  if(any(pred_objective=="class")) {
+    out$pred_objective$class <- array(NA, c(n_models, n_sim))
+    rownames(out$pred_objective$class) <- model_names
+    colnames(out$pred_objective$class) <- paste0("sim_",1:n_sim)
+  }
+
+  if(any(pred_objective=="ep")) {
+    out$pred_objective$ep <- array(NA, c(n_models, n_sim))
+    rownames(out$pred_objective$ep) <- model_names
+    colnames(out$pred_objective$ep) <- paste0("sim_",1:n_sim)
+  }
+
+  lp_true_sim <- st_drop_geometry(obj_sim$lp_grid_sim[, grepl("lp_sim",
+                                                              names(obj_sim$lp_grid_sim))])
+  true_target_sim <- f_grid_target(lp_true_sim)
+
+  for(i in 1:n_models) {
+    for(j in 1:n_sim) {
+      obj_pred_ij <- preds[[paste(model_names[i])]][[j]]
+      if(length(obj_pred_ij$mu_pred)==1 && obj_pred_ij$mu_pred==0 &&
+         include_covariates) {
+        stop("Covariates have not been provided; re-run pred_over_grid
+         and provide the covariates through the argument 'predictors'")
+      }
+
+
+      if(!include_covariates) {
+        mu_target <- 0
+      } else {
+
+        if(is.null(obj_pred_ij$mu_pred)) stop("the output obtained from 'pred_S' does not
+                                     contain any covariates; if including covariates
+                                     in the predictive target these shuold be included
+                                     when running 'pred_S'")
+        mu_target <- obj_pred_ij$mu_pred
+      }
+
+      if(!include_cov_offset) {
+        cov_offset <- 0
+      } else {
+        if(length(obj_pred_ij$cov_offset)==1) {
+          stop("No covariate offset was included in the model;
+           set include_cov_offset = FALSE, or refit the model and include
+           the covariate offset")
+        }
+        cov_offset <- obj_pred_ij$cov_offset
+      }
+
+      if(include_nugget) {
+        if(is.null(obj_pred_ij$par_hat$tau2)) stop("'include_nugget' cannot be
+                                                   set to TRUE if this has not been included
+                                                   in the fit of the model")
+        Z_sim <- matrix(rnorm(n_samples*n_pred,
+                              sd = sqrt(obj_pred_ij$par_hat$tau2)),
+                        ncol = n_samples)
+        obj_pred_ij$S_samples <- obj_pred_ij$S_samples+Z_sim
+      }
+
+      if(is.matrix(mu_target)) {
+        lp_samples_ij <- sapply(1:n_samples,
+                                function(h)
+                                  mu_target[,h] + cov_offset +
+                                  obj_pred_ij$S_samples[,h])
+      } else {
+        lp_samples_ij <- sapply(1:n_samples,
+                                function(h)
+                                  mu_target + cov_offset +
+                                  obj_pred_ij$S_samples[,h])
+      }
+
+      target_samples_ij <- f_grid_target(lp_samples_ij)
+
+      mean_target_ij <- apply(target_samples_ij, 1, mean)
+
+      if(any(pred_objective=="mse")) {
+        out$pred_objective$mse[i,j] <- mean((mean_target_ij-true_target_sim[,j])^2)
+      }
+
+      if(any(pred_objective=="ep")) {
+        out$pred_objective$mse[i,j] <- mean((mean_target_ij-true_target_sim[,j])^2)
+      }
+    }
+  }
+
+
+
 }
