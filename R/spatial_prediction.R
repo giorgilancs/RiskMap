@@ -1589,22 +1589,36 @@ plot_sim_surf <-  function(surf_obj, sim, ...) {
 assess_sim <- function(obj_sim,
                        models,
                        control_mcmc = set_control_sim(),
-                       type = "marginal",
+                       spatial_scale,
                        messages = TRUE,
                        f_grid_target = NULL,
                        f_area_target = NULL,
-                       pred_objective = c("mse","class","ep"),
-                       threshold = NULL) {
+                       shp = NULL,
+                       pred_objective = c("mse","classify"),
+                       categories= NULL) {
 
-  if(inherits(obj_sim,
-              what = "RiskMap.sim", which = FALSE)) {
-    stop("'obj_sim' must be an object of class 'RiskMap.sim' obtained
-         as an output from the 'surf_sim' function")
+  if (!inherits(obj_sim, "RiskMap.sim")) {
+    stop("'obj_sim' must be an object of class 'RiskMap.sim' obtained as an output from the 'surf_sim' function")
   }
-  if (length(setdiff(pred_objective, c("mse","class","ep")))>0) {
-    stop(paste("Invalid value for pred_objective. Allowed values are:", paste(allowed_values, collapse = ", ")))
+  if (length(setdiff(pred_objective, c("mse","classify")))>0) {
+    stop(paste("Invalid value for pred_objective. Allowed values are:", paste(c("mse","classify"), collapse = ", ")))
+  }
+  if(spatial_scale != "grid" & spatial_scale != "area") {
+    stop("'spatial_scale' must be set to 'grid' or 'area'")
+  }
+  if(spatial_scale=="area" & is.null(shp)) {
+    stop("if spatial_scale='area' then a shape file of the area(s) must be passed to
+         'shp'")
   }
 
+  if(!inherits(shp,
+               what = c("sf","data.frame"), which = FALSE)) {
+    stop("The object passed to 'shp' must be an object of class 'sf'")
+  }
+
+  if(any(pred_objective=="class")) {
+    if(is.null(categories)) stop("if pred_objective='class', a value for 'categories' must be specified")
+  }
   n_sim <- length(obj_sim$data_sim)
   n_models <- length(models)
 
@@ -1616,6 +1630,11 @@ assess_sim <- function(obj_sim,
 
   fits <- list()
   preds <- list()
+  if(spatial_scale=="grid") {
+    type <- "marginal"
+  } else if(spatial_scale=="area") {
+    type <- "joint"
+  }
   for(i in 1:n_models) {
     if(messages) message("Model: ", paste(model_names[i]),"\n")
 
@@ -1659,21 +1678,33 @@ assess_sim <- function(obj_sim,
     colnames(out$pred_objective$mse) <- paste0("sim_",1:n_sim)
   }
 
-  if(any(pred_objective=="class")) {
-    out$pred_objective$class <- array(NA, c(n_models, n_sim))
-    rownames(out$pred_objective$class) <- model_names
-    colnames(out$pred_objective$class) <- paste0("sim_",1:n_sim)
+  if(any(pred_objective=="classify")) {
+    out$pred_objective$classify <- setNames(vector("list", length(model_names)), model_names)
+    categories_class <- cut(
+      categories,
+      breaks = c(-Inf, categories[-1]),
+      labels = paste0("(", head(categories, -1), ",", categories[-1], "]"),
+      include.lowest = TRUE
+    )
+    for(i in 1:n_models) {
+      out$pred_objective$classify[[model_names[i]]] <- vector("list", n_sim)
+      for(j in 1:n_sim) {
+        out$pred_objective$classify[[paste(model_names[i])]][[j]] <-
+          data.frame(
+            Class = categories_class,
+            Sensitivity = NA,
+            Specificity = NA,
+            PPV = NA,
+            NPV = NA
+          )
+      }
+    }
   }
-
-  if(any(pred_objective=="ep")) {
-    out$pred_objective$ep <- array(NA, c(n_models, n_sim))
-    rownames(out$pred_objective$ep) <- model_names
-    colnames(out$pred_objective$ep) <- paste0("sim_",1:n_sim)
-  }
-
   lp_true_sim <- st_drop_geometry(obj_sim$lp_grid_sim[, grepl("lp_sim",
                                                               names(obj_sim$lp_grid_sim))])
   true_target_sim <- f_grid_target(lp_true_sim)
+
+
 
   for(i in 1:n_models) {
     for(j in 1:n_sim) {
@@ -1731,18 +1762,51 @@ assess_sim <- function(obj_sim,
 
       target_samples_ij <- f_grid_target(lp_samples_ij)
 
-      mean_target_ij <- apply(target_samples_ij, 1, mean)
+      if(spatial_scale == "grid") {
+        mean_target_ij <- apply(target_samples_ij, 1, mean)
+      } else {
 
+      }
       if(any(pred_objective=="mse")) {
         out$pred_objective$mse[i,j] <- mean((mean_target_ij-true_target_sim[,j])^2)
       }
 
-      if(any(pred_objective=="ep")) {
-        out$pred_objective$mse[i,j] <- mean((mean_target_ij-true_target_sim[,j])^2)
+      if(any(pred_objective=="classify")) {
+        true_class_ij <- cut(true_target_sim[,j], breaks = categories)
+        n_categories <- length(categories)-1
+        prob_cat_ij <- matrix(0, nrow=n_pred, ncol = n_categories)
+
+        for(h in 1:(n_categories)) {
+          prob_cat_ij[,h] <- apply(categories[h] < target_samples_ij &
+                                     categories[h+1] > target_samples_ij, 1, mean)
+        }
+
+        pred_class_ij <- apply(prob_cat_ij, 1, function(x) categories_class[which.max(x)])
+
+        # Define the confusion matrix
+        conf_matrix <- table(true_class_ij, pred_class_ij)
+
+        # Calculate metrics for each class
+        for (h in 1:nrow(conf_matrix)) {
+          TP <- conf_matrix[h, h]
+          FN <- sum(conf_matrix[h, ]) - TP
+          FP <- sum(conf_matrix[, h]) - TP
+          TN <- sum(conf_matrix) - (TP + FN + FP)
+
+          # Handle cases where division by zero could occur
+          out$pred_objective$classify[[paste(model_names[[i]])]][[j]][h,]$Sensitivity <-
+            ifelse((TP + FN) == 0, NA, TP / (TP + FN))
+          out$pred_objective$classify[[paste(model_names[[i]])]][[j]][h,]$Specificity <-
+            ifelse((TN + FP) == 0, NA, TN / (TN + FP))
+          out$pred_objective$classify[[paste(model_names[[i]])]][[j]][h,]$PPV <-
+            ifelse((TP + FP) == 0, NA, TP / (TP + FP))
+          out$pred_objective$classify[[paste(model_names[[i]])]][[j]][h,]$NPV <-
+            ifelse((TN + FN) == 0, NA, TN / (TN + FN))
+        }
       }
     }
   }
-
-
-
+  class(out) <- "RiskMap.sim.res"
+  return(out)
 }
+
