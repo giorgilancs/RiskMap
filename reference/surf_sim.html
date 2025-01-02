@@ -47,6 +47,7 @@
 <span>  control_mcmc <span class="op">=</span> <span class="fu"><a href="set_control_sim.html">set_control_sim</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  <span class="va">par0</span>,</span>
 <span>  nugget_over_grid <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  include_covariates <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  fix_var_me <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  messages <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
@@ -92,6 +93,11 @@
 <dd><p>A logical indicating whether to include a nugget effect over the entire prediction grid.</p></dd>
 
 
+<dt id="arg-include-covariates">include_covariates<a class="anchor" aria-label="anchor" href="#arg-include-covariates"></a></dt>
+<dd><p>A logical indicateing if the covariates (or the intercept if no covariates are used) should be included in the linear
+predictor. By default <code>include_covariates = TRUE</code></p></dd>
+
+
 <dt id="arg-fix-var-me">fix_var_me<a class="anchor" aria-label="anchor" href="#arg-fix-var-me"></a></dt>
 <dd><p>A parameter to fix the variance of the random effects for the measurement error. Defaults to `NULL`.</p></dd>
 
@@ -102,8 +108,11 @@
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A list containing the simulated data (`data_sim`), the linear predictors (`lp_grid_sim`),
-the model parameters set for the simulation (`par0`) and the family used in the model (`family`).</p>
+    <p>A list containing the simulated data (<code>data_sim</code>), the linear predictors (<code>lp_grid_sim</code>),
+a logical value indicating if covariates have been included in the linear predictor (<code>include_covariates</code>),
+a logical value indicating if the nugget has been included into the simulations of the linear predictor over the grid
+(<code>nugget_over_grid</code>), a logical  indicating if a covariate offset has been included in the linear predictor (<code>include_cov_offset</code>),
+the model parameters set for the simulation (<code>par0</code>) and the family used in the model (<code>family</code>).</p>
     </div>
     <div class="section level2">
     <h2 id="author">Author<a class="anchor" aria-label="anchor" href="#author"></a></h2>
