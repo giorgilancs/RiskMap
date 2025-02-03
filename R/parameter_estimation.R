@@ -2080,7 +2080,7 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
                                 progress)
 
     # Use cat() to write to stderr (equivalent to message())
-    cat(progress_message, file = stderr())
+    if(messages) cat(progress_message, file = stderr())
 
     # Ensure output is flushed to console
     flush.console()
