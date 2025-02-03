@@ -1634,6 +1634,9 @@ assess_sim <- function(obj_sim,
   n_sim <- length(obj_sim$data_sim)
   n_models <- length(models)
 
+  if(spatial_scale == "area" & is.null(f_area_target)) {
+    stop("If 'spatial_scale' is set to 'area', then 'f_area_target' must be provided")
+  }
   model_names <- names(models)
 
   include_covariates <- obj_sim$include_covariates
