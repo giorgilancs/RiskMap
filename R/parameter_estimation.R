@@ -2083,7 +2083,7 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
     if(messages) cat(progress_message, file = stderr())
 
     # Ensure output is flushed to console
-    flush.console()
+    if(messages) flush.console()
 
   }
 

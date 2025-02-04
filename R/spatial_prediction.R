@@ -1893,10 +1893,9 @@ assess_sim <- function(obj_sim,
           out$pred_objective$classify[[paste(model_names[[i]])]]$by_cat[[j]][h,]$CC <-
             ifelse((TP + FN) == 0, NA, (TP ) / (TP + FN))
         }
-
+        out$pred_objective$classify[[paste(model_names[[i]])]]$CC[j] <-
+          mean(true_class_ij==pred_class_ij)
       }
-      out$pred_objective$classify[[paste(model_names[[i]])]]$CC[j] <-
-        mean(true_class_ij==pred_class_ij)
     }
   }
   if(any(pred_objective=="classify")) out$pred_objective$classify$Class <- categories_class
