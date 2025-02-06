@@ -1627,8 +1627,8 @@ assess_sim <- function(obj_sim,
 
   if(any(pred_objective=="classify")) {
     if(is.null(categories)) stop("if pred_objective='class', a value for 'categories' must be specified")
-    if (length(categories) < 2) {
-      stop("Categories vector must contain at least two unique, strictly increasing values.")
+    if (length(categories) < 3) {
+      stop("Categories vector must contain at least three unique, strictly increasing values.")
     }
   }
   n_sim <- length(obj_sim$data_sim)
@@ -1955,20 +1955,24 @@ summary.RiskMap.sim.res <- function(object, ...) {
 
       n_sim <- length(model_data$by_cat)
       res_class <- model_data$by_cat[[1]][,-1]
+      den <- 0
       for(j in 2:n_sim) {
-        res_class <- res_class+model_data$by_cat[[j]][,-1]
+        if(!any(is.na(model_data$by_cat[[j]][,-1]))) {
+          den <- den + 1
+          res_class <- res_class+model_data$by_cat[[j]][,-1]
+        }
       }
-      res_class <- data.frame(res_class/n_sim)
+      res_class <- data.frame(res_class/den)
       res_class$Class <- model_data$by_cat[[1]][,1]
 
-      cc_summary <- list(mean = mean(model_data$CC),
-                         lower = quantile(model_data$CC, 0.025),
-                         upper = quantile(model_data$CC, 0.975))
+      cc_summary <- list(mean = mean(model_data$CC, na.rm = TRUE),
+                         lower = quantile(model_data$CC, 0.025, na.rm = TRUE),
+                         upper = quantile(model_data$CC, 0.975, na.rm = TRUE))
 
       results$classify[[paste(name_models[i])]] <- list(classify_res = res_class,
-                                            cc_summary = list(mean = mean(model_data$CC),
-                                                                     lower = quantile(model_data$CC, 0.025),
-                                                                     upper = quantile(model_data$CC, 0.975)))
+                                            cc_summary = list(mean = mean(model_data$CC, na.rm = TRUE),
+                                                                     lower = quantile(model_data$CC, 0.025, na.rm = TRUE),
+                                                                     upper = quantile(model_data$CC, 0.975, na.rm = TRUE)))
     }
   }
 
@@ -2022,10 +2026,10 @@ print.summary.RiskMap.sim.res <- function(x, ...) {
 
       cat(sprintf("\nModel: %s\n", model_name))
 
-      cat("\nAverage by Category:\n")
+      cat("\nAverages across simulations by Category:\n")
       print(model_data$classify_res)
 
-      cat("\nProportion of Correct Classification Summary (CC):\n")
+      cat("\nProportion of Correct Classification (CC) across categories:\n")
       cc_summary <- model_data$cc_summary
       cat(sprintf("Mean: %.3f, 95%% CI: [%.3f, %.3f]\n",
                   cc_summary$mean, cc_summary$lower, cc_summary$upper))
