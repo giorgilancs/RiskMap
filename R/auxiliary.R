@@ -58,32 +58,47 @@ convex_hull_sf <- function(sf_object) {
 ##' Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @importFrom sf st_transform st_coordinates
 ##' @export
-propose_utm <- function(data) {
-  if(class(data)[1] != "sf") stop("'data' must be an object of class sf")
-  if(is.na(st_crs(data))) stop("the CRS of the data is missing and must be specified; see ?st_crs")
+propose_utm <- function (data) {
+  if (class(data)[1] != "sf")
+    stop("'data' must be an object of class sf")
+  if (is.na(st_crs(data)))
+    stop("the CRS of the data is missing and must be specified; see ?st_crs")
 
+  # Transform to WGS84 (EPSG:4326) to ensure coordinates are in lon/lat
   data <- st_transform(data, crs = 4326)
-  utm_z <- floor((st_coordinates(data)[,1] + 180) / 6) + 1
+
+  # Calculate UTM Zone
+  utm_z <- floor((st_coordinates(data)[, 1] + 180)/6) + 1
   utm_z_u <- unique(utm_z)
-  if(length(utm_z_u) > 1) {
+
+  if (length(utm_z_u) > 1) {
     tab_utm <- table(utm_z)
-    if(all(diff(tab_utm) == 0)) warning("an equal amount of locations falls in different UTM zones")
+    if (all(diff(tab_utm) == 0))
+      warning("An equal amount of locations falls in different UTM zones")
     utm_z_u <- as.numeric(names(which.max(tab_utm)))
   }
-  ns <- sign(st_coordinates(data)[,1])
+
+  # Determine Hemisphere (fixing the latitude check)
+  ns <- sign(st_coordinates(data)[, 2])  # Use latitude, not longitude
   ns_u <- unique(ns)
-  if(length(ns_u) > 1) {
+
+  if (length(ns_u) > 1) {
     tab_ns <- table(ns_u)
-    if(all(diff(tab_ns) == 0)) warning("an equal amount of locations falls north and south of the Equator")
+    if (all(diff(tab_ns) == 0))
+      warning("An equal amount of locations falls north and south of the Equator")
     ns_u <- as.numeric(names(which.max(tab_ns)))
   }
+
+  # Construct EPSG code for UTM zone
   if (ns_u == 1) {
-    out <- as.numeric(paste(326, utm_z_u, sep = ""))
-  } else if(ns_u == -1) {
-    out <- as.numeric(paste(327, utm_z_u, sep = ""))
+    out <- as.numeric(paste0(326, utm_z_u))  # Northern Hemisphere
+  } else if (ns_u == -1) {
+    out <- as.numeric(paste0(327, utm_z_u))  # Southern Hemisphere
   }
+
   return(out)
 }
+
 
 ##' @title Matern Correlation Function
 ##' @description Computes the Matern correlation function.
