@@ -1140,7 +1140,7 @@ assess_pp <- function(object,
 
     par_hat <- coef(object[[h]])
     den_name <- as.character(object[[h]]$call$den)
-    if(object[[h]]$cov_offset==0) object[[h]]$cov_offset <- NULL
+    if(any(object[[h]]$cov_offset==0)) object[[h]]$cov_offset <- NULL
 
     refit <- list()
 
@@ -1235,7 +1235,7 @@ assess_pp <- function(object,
       if(!is.null(object[[h]]$cov_offset)) {
         pred_cov_offset_i <- object[[h]]$cov_offset[-data_split$splits[[i]]$in_id]
       } else {
-        pred_cov_offset_i <- NULL
+        pred_cov_offset_i <- rep(0,nrow(data_sf_i))
       }
 
       message("\n Model: ", paste(model_names[h]),"\n Spatial prediction for the Subset no. ",i,"\n")

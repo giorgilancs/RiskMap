@@ -924,7 +924,7 @@ plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = N
   }
 
   # Create a data frame for plotting
-  plot_data <- do.call(rbind, lapply(seq_along(object), function(i) {
+  plot_data <- do.call(rbind, lapply(seq_along(object)[-length(object)], function(i) {
     AnPIT_list <- object$model[[i]]$AnPIT
     model_name <- names(object$model)[i]
     do.call(rbind, lapply(seq_along(AnPIT_list), function(j) {
