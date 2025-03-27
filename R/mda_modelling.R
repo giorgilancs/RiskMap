@@ -27,127 +27,83 @@ compute_mda_effect <- function(survey_times_data, mda_times, intervention,
   return(effect)
 }
 
+
 compute_mda_effect_derivatives <- function(survey_times_data, mda_times, intervention,
                                            alpha, gamma, kappa) {
   n <- length(survey_times_data)
-  effect <- rep(NA, n)
-  d_alpha <- rep(NA, n)
-  d_gamma <- rep(NA, n)
-  d2_alpha <- rep(NA, n)
-  d2_gamma <- rep(NA, n)
-  d2_alpha_gamma <- rep(NA, n)
-
-  mda_effect_f <- function(v, alpha, gamma, kappa) {
-    alpha * exp(-(v / gamma)^kappa)
-  }
-
-  d_mda_effect_f_alpha <- function(v, alpha, gamma, kappa) {
-    exp(-(v / gamma)^kappa)
-  }
-
-  d_mda_effect_f_gamma <- function(v, alpha, gamma, kappa) {
-    alpha * exp(-(v / gamma)^kappa) * kappa * (v / gamma)^(kappa - 1) * (v / gamma^2)
-  }
-
-  d2_mda_effect_f_alpha <- function(v, alpha, gamma, kappa) {
-    0
-  }
-
-  d2_mda_effect_f_gamma <- function(v, alpha, gamma, kappa) {
-    alpha * exp(-(v / gamma)^kappa) * kappa * (v / gamma)^(kappa - 2) * ((kappa - 1) * (v / gamma) - kappa) * (v^2 / gamma^4)
-  }
-
-  d2_mda_effect_f_alpha_gamma <- function(v, alpha, gamma, kappa) {
-    -exp(-(v / gamma)^kappa) * kappa * (v / gamma)^(kappa - 1) * (v / gamma^2)
-  }
-
-  f <- function(t, mda_times, int, alpha, gamma, kappa) {
-    ind_t <- which(t > mda_times)
-    u_j <- mda_times[ind_t]
-
-    if (length(u_j) > 0) {
-      effects <- (1 - mda_effect_f(t - u_j, alpha, gamma, kappa))^int[ind_t]
-      return(prod(effects))
-    } else {
-      return(1)
-    }
-  }
-
-  df_dalpha <- function(t, mda_times, int, alpha, gamma, kappa) {
-    ind_t <- which(t > mda_times)
-    u_j <- mda_times[ind_t]
-
-    if (length(u_j) > 0) {
-      effects <- (1 - mda_effect_f(t - u_j, alpha, gamma, kappa))^int[ind_t]
-      return(prod(effects) * sum(-int[ind_t] * d_mda_effect_f_alpha(t - u_j, alpha, gamma, kappa) / (1 - mda_effect_f(t - u_j, alpha, gamma, kappa))))
-    } else {
-      return(0)
-    }
-  }
-
-  df_dgamma <- function(t, mda_times, int, alpha, gamma, kappa) {
-    ind_t <- which(t > mda_times)
-    u_j <- mda_times[ind_t]
-
-    if (length(u_j) > 0) {
-      effects <- (1 - mda_effect_f(t - u_j, alpha, gamma, kappa))^int[ind_t]
-      return(prod(effects) * sum(-int[ind_t] * d_mda_effect_f_gamma(t - u_j, alpha, gamma, kappa) / (1 - mda_effect_f(t - u_j, alpha, gamma, kappa))))
-    } else {
-      return(0)
-    }
-  }
-
-  d2f_dalpha2 <- function(t, mda_times, int, alpha, gamma, kappa) {
-    ind_t <- which(t > mda_times)
-    u_j <- mda_times[ind_t]
-
-    if (length(u_j) > 0) {
-      effects <- (1 - mda_effect_f(t - u_j, alpha, gamma, kappa))^int[ind_t]
-      return(prod(effects) * sum(int[ind_t] * (int[ind_t] - 1) * (d_mda_effect_f_alpha(t - u_j, alpha, gamma, kappa)^2) / ((1 - mda_effect_f(t - u_j, alpha, gamma, kappa))^2)))
-    } else {
-      return(0)
-    }
-  }
-
-  d2f_dgamma2 <- function(t, mda_times, int, alpha, gamma, kappa) {
-    ind_t <- which(t > mda_times)
-    u_j <- mda_times[ind_t]
-
-    if (length(u_j) > 0) {
-      effects <- (1 - mda_effect_f(t - u_j, alpha, gamma, kappa))^int[ind_t]
-      return(prod(effects) * sum(int[ind_t] * (int[ind_t] - 1) * (d_mda_effect_f_gamma(t - u_j, alpha, gamma, kappa)^2) / ((1 - mda_effect_f(t - u_j, alpha, gamma, kappa))^2)))
-    } else {
-      return(0)
-    }
-  }
-
-  d2f_dalpha_gamma <- function(t, mda_times, int, alpha, gamma, kappa) {
-    ind_t <- which(t > mda_times)
-    u_j <- mda_times[ind_t]
-
-    if (length(u_j) > 0) {
-      effects <- (1 - mda_effect_f(t - u_j, alpha, gamma, kappa))^int[ind_t]
-      return(prod(effects) * sum(int[ind_t] * (int[ind_t] - 1) * d_mda_effect_f_alpha(t - u_j, alpha, gamma, kappa) * d_mda_effect_f_gamma(t - u_j, alpha, gamma, kappa) / ((1 - mda_effect_f(t - u_j, alpha, gamma, kappa))^2)))
-    } else {
-      return(0)
-    }
-  }
+  effect <- numeric(n)
+  d_alpha <- numeric(n)
+  d_gamma <- numeric(n)
+  d2_alpha <- numeric(n)
+  d2_gamma <- numeric(n)
+  d2_alpha_gamma <- numeric(n)
 
   for (i in 1:n) {
-    effect[i] <- f(survey_times_data[i], mda_times, intervention[i,], alpha, gamma, kappa)
-    d_alpha[i] <- df_dalpha(survey_times_data[i], mda_times, intervention[i,], alpha, gamma, kappa)
-    d_gamma[i] <- df_dgamma(survey_times_data[i], mda_times, intervention[i,], alpha, gamma, kappa)
-    d2_alpha[i] <- d2f_dalpha2(survey_times_data[i], mda_times, intervention[i,], alpha, gamma, kappa)
-    d2_gamma[i] <- d2f_dgamma2(survey_times_data[i], mda_times, intervention[i,], alpha, gamma, kappa)
-    d2_alpha_gamma[i] <- d2f_dalpha_gamma(survey_times_data[i], mda_times, intervention[i,], alpha, gamma, kappa)
+    t <- survey_times_data[i]
+    int <- intervention[i,]
+
+    ind_t <- which(t > mda_times)
+    u_j <- mda_times[ind_t]
+    int_j <- int[ind_t]
+
+    if (length(u_j) > 0) {
+      v_j <- t - u_j
+      z_j <- (v_j/gamma)^kappa
+      e_j <- exp(-z_j)
+      denom <- 1 - alpha * e_j
+      effect[i] <- exp(sum(int_j * log(denom)))
+
+      # First derivatives (CORRECT - matches numeric)
+      term_alpha <- int_j * e_j / denom
+      dlogP_dalpha <- -sum(term_alpha)
+
+      gamma_term <- kappa * z_j / gamma
+      term_gamma <- alpha * term_alpha * gamma_term
+      dlogP_dgamma <- -sum(term_gamma)
+
+      # Second derivatives
+      # ∂²(log P)/∂α² (CORRECT - matches numeric)
+      d2logP_dalpha2 <- -sum(int_j * e_j^2 / denom^2)
+
+      #######################################################
+      # CORRECTED ∂²(log P)/∂γ² (FIXED SIGN)
+      # f = αe^{-z}, z = (v/γ)^κ
+      # ∂f/∂γ = f * (κz/γ)
+      # ∂²f/∂γ² = f * [κz(κ+1 - κz)/γ²]
+      term1 <- (alpha * e_j * kappa * z_j * (kappa + 1 - kappa*z_j)) /
+        (gamma^2 * denom)
+      term2 <- (alpha * e_j * kappa * z_j / (gamma * denom))^2
+      d2logP_dgamma2 <- sum(int_j * (term1 - term2))
+      #######################################################
+
+      # ∂²(log P)/∂α∂γ (CORRECT - matches numeric)
+      term_cross <- e_j * gamma_term / denom
+      d2logP_dalphadgamma <- sum(int_j * (-term_cross - alpha * e_j * term_cross / denom))
+
+      # Convert to derivatives of P
+      d_alpha[i] <- effect[i] * dlogP_dalpha
+      d_gamma[i] <- effect[i] * dlogP_dgamma
+      d2_alpha[i] <- effect[i] * (dlogP_dalpha^2 + d2logP_dalpha2)
+      d2_gamma[i] <- effect[i] * (dlogP_dgamma^2 + d2logP_dgamma2)
+      d2_alpha_gamma[i] <- effect[i] * (dlogP_dalpha * dlogP_dgamma + d2logP_dalphadgamma)
+
+    } else {
+      effect[i] <- 1
+      d_alpha[i] <- 0
+      d_gamma[i] <- 0
+      d2_alpha[i] <- 0
+      d2_gamma[i] <- 0
+      d2_alpha_gamma[i] <- 0
+    }
   }
 
-  return(list(effect = effect, d_alpha = d_alpha, d_gamma = d_gamma,
-              d2_alpha = d2_alpha, d2_gamma = d2_gamma, d2_alpha_gamma = d2_alpha_gamma))
+  return(list(effect = effect,
+              d_alpha = d_alpha,
+              d_gamma = d_gamma,
+              d2_alpha = d2_alpha,
+              d2_gamma = d2_gamma,
+              d2_alpha_gamma = d2_alpha_gamma))
 }
-
-
-
 
 dast_initial_value <- function(y, D, units_m, int_mat, survey_times_data,
                                mda_times, power_val) {
