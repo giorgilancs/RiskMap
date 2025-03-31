@@ -1,5 +1,6 @@
 compute_mda_effect <- function(survey_times_data, mda_times, intervention,
                                alpha, gamma, kappa) {
+  n <- length(survey_times_data)
   effect <- rep(NA, n)
 
   mda_effect_f <- function(v, alpha, gamma, kappa) {
@@ -106,15 +107,20 @@ compute_mda_effect_derivatives <- function(survey_times_data, mda_times, interve
 }
 
 dast_initial_value <- function(y, D, units_m, int_mat, survey_times_data,
-                               mda_times, power_val) {
+                               mda_times, fix_alpha, power_val) {
 
   p <- ncol(D)
   n <- nrow(D)
 
   llik <- function(par) {
     beta <- par[1:p]
-    alpha <- exp(par[p+1])/(1+exp(par[p+1]))
-    gamma <- exp(par[p+2])
+    if(is.null(fix_alpha)) {
+      alpha <- exp(par[p+1])/(1+exp(par[p+1]))
+      gamma <- exp(par[p+2])
+    } else {
+      alpha <- fix_alpha
+      gamma <- exp(par[p+1])
+    }
 
     fact <- compute_mda_effect(survey_times_data, mda_times, intervention,
                                alpha, gamma, kappa = power_val)
@@ -130,8 +136,13 @@ dast_initial_value <- function(y, D, units_m, int_mat, survey_times_data,
   est <- nlminb(start, llik)
 
   est$beta <- est$par[1:p]
-  est$alpha <- exp(est$par[p+1])/(1+exp(est$par[p+1]))
-  est$gamma <- exp(est$par[p+2])
+  if(is.null(fix_alpha)) {
+    est$alpha <- exp(est$par[p+1])/(1+exp(est$par[p+1]))
+    est$gamma <- exp(est$par[p+2])
+  } else {
+    est$gamma <- exp(est$par[p+1])
+  }
+
   return(est)
 }
 
@@ -139,7 +150,8 @@ dast_initial_value <- function(y, D, units_m, int_mat, survey_times_data,
 
 dast <- function(formula,
                  data,
-                 den = NULL, survey_times, mda_times,
+                 den = NULL, survey_times, mda_times, int_mat,
+                 drop = NULL, power_val,
                  crs = NULL, convert_to_crs = NULL,
                  scale_to_km = TRUE,
                  control_mcmc = set_control_sim(),
@@ -151,7 +163,9 @@ dast <- function(formula,
                                    sigma2 = NULL,
                                    tau2 = NULL,
                                    phi = NULL,
-                                   sigma2_re = NULL)) {
+                                   sigma2_re = NULL,
+                                   gamma = NULL,
+                                   alpha = NULL)) {
 
   nong <- TRUE
 
@@ -225,13 +239,13 @@ dast <- function(formula,
     do_name <- deparse(substitute(den))
     if(do_name=="NULL") {
       units_m <- rep(1, nrow(data))
-      if(family=="binomial") warning("'den' is assumed to be 1 for all observations \n")
+      warning("'den' is assumed to be 1 for all observations \n")
     } else {
       units_m <- data[[do_name]]
     }
     if(is.integer(units_m)) units_m <- as.numeric(units_m)
     if(!is.numeric(units_m)) stop("the variable passed to `den` must be numeric")
-    if(family=="binomial" & any(y > units_m)) stop("The counts identified by the outcome variable cannot be larger
+    if(any(y > units_m)) stop("The counts identified by the outcome variable cannot be larger
                               than `den` in the case of a Binomial distribution")
     if(!inherits(control_mcmc,
                  what = "mcmc.RiskMap", which = FALSE)) {
@@ -252,7 +266,11 @@ dast <- function(formula,
   } else {
     hr_re <- NULL
   }
-
+  if(!is.null(drop)) {
+    fix_alpha <- drop
+  } else {
+    fix_alpha <- NULL
+  }
 
   if(!is.null(hr_re)) {
     # Define indices of random effects
@@ -318,12 +336,22 @@ dast <- function(formula,
     if(messages) message("Distances between locations are computed in meters ")
   }
 
-
   if(is.null(start_pars$beta)) {
+    aux_data <- data.frame(y=y, units_m = units_m, D[,-1])
+    if(length(cov_offset)==1) cov_offset_aux <- rep(cov_offset, n)
+    glm_fitted <- glm(cbind(y, units_m - y) ~ ., offset = cov_offset,
+                      data = aux_data, family = binomial)
+    start_pars$beta <- stats::coef(glm_fitted)
+  }
+
+  if(is.null(start_pars$gamma) | (is.null(drop) & is.null(start_pars$alpha)) ) {
     dast_i <- dast_initial_value(y, D, units_m, int_mat = int_mat, survey_times_data,
+                                 fix_alpha = fix_alpha,
                       mda_times, power_val = power_val)
     start_pars$beta <- dast_i$beta
-    start_pars$alpha <- dast_i$alpha
+    if(is.null(drop)) {
+      start_pars$alpha <- dast_i$alpha
+    }
     start_pars$gamma <- dast_i$gamma
   } else {
     if(length(start_pars$beta)!=ncol(D)) stop("number of starting values provided
@@ -363,22 +391,27 @@ dast <- function(formula,
     }
   }
 
+
+
   if(is.null(par0)) {
     par0 <- start_pars
   } else {
+    start_pars <- par0
     if(length(par0$beta)!=ncol(D)) stop("the values passed to `beta` in par0 do not match the
                                         variables specified in the formula")
   }
   res <- dast_fit(y = y, D, coords, units_m = units_m,
-                  mda_times = mda_time, survey_times_data = survey_times_data,
+                  mda_times = mda_times, survey_times_data = survey_times_data,
                   int_mat = int_mat,
                   kappa = inter_f$gp.spec$kappa,
                       ID_coords, ID_re, s_unique, re_unique,
-                      fix_tau2, family = family,
+                      fix_tau2, fix_alpha,
                       return_samples = return_samples,
                       par0 = par0, cov_offset = cov_offset,
                       power_val = power_val,
                       start_beta = start_pars$beta,
+                      start_alpha = start_pars$alpha,
+                      start_gamma = start_pars$gamma,
                       start_cov_pars = c(start_pars$sigma2,
                                          start_pars$phi,
                                          start_pars$tau2,
@@ -390,16 +423,19 @@ dast <- function(formula,
   res$y <- y
   res$D <- D
   res$coords <- coords
+  res$mda_times <- mda_times
+  res$survey_times_data <- survey_times_data
+  res$int_mat <- int_mat
   res$ID_coords <- ID_coords
   if(n_re>0) {
     res$re <- re_unique_f
     res$ID_re <- as.data.frame(ID_re)
     colnames(res$ID_re) <- names_re
   }
+  res$power_val <- power_val
   res$fix_tau2 <- fix_tau2
-  res$fix_var_me <- fix_var_me
+  res$fix_alpha <- fix_alpha
   res$formula <- formula
-  res$family <- family
   if(!is.null(convert_to_crs)) {
     crs <- convert_to_crs
   } else {
@@ -408,6 +444,7 @@ dast <- function(formula,
   res$crs <- crs
   res$scale_to_km <- scale_to_km
   res$data_sf <- data
+  res$family <- "binomial"
   res$kappa <- kappa
   if(nong) res$units_m <- units_m
   res$cov_offset <- cov_offset
@@ -422,8 +459,9 @@ dast_fit <-
            int_mat,
            par0, cov_offset, power_val,
            ID_coords, ID_re, s_unique, re_unique,
-           fix_tau2, family,return_samples,
+           fix_tau2, fix_alpha, return_samples,
            start_beta,
+           start_alpha, start_gamma,
            start_cov_pars,
            control_mcmc,
            messages = TRUE) {
@@ -455,6 +493,7 @@ dast_fit <-
     sigma2_re_0 <- par0$sigma2_re
 
     alpha0 <- par0$alpha
+    if(is.null(alpha0)) alpha0<- fix_alpha
 
     gamma0 <- par0$gamma
 
@@ -495,16 +534,25 @@ dast_fit <-
         ind_sigma2_re <- (p+2+1):(p+2+n_re)
         n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[,i])))
       }
-      ind_alpha <- p+n_re+3
-      ind_gamma <- p+n_re+4
+      if(is.null(fix_alpha)) {
+        ind_alpha <- p+n_re+3
+        ind_gamma <- p+n_re+4
+      } else {
+        ind_gamma <- p+n_re+3
+      }
+
     } else {
       ind_nu2 <- p+3
       if(n_re>0) {
         ind_sigma2_re <- (p+3+1):(p+3+n_re)
         n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[,i])))
       }
-      ind_alpha <- p+n_re+4
-      ind_gamma <- p+n_re+5
+      if(is.null(fix_alpha)) {
+        ind_alpha <- p+n_re+4
+        ind_gamma <- p+n_re+5
+      } else {
+        ind_gamma <- p+n_re+4
+      }
     }
 
 
@@ -560,7 +608,11 @@ dast_fit <-
       beta <- par[ind_beta]
       sigma2 <- exp(par[ind_sigma2])
 
-      alpha <- exp(par[ind_alpha])/(1+exp(par[ind_alpha]))
+      if(is.null(fix_alpha)) {
+        alpha <- exp(par[ind_alpha])/(1+exp(par[ind_alpha]))
+      } else {
+        alpha <- fix_alpha
+      }
 
       gamma <- exp(par[ind_gamma])
 
@@ -592,17 +644,29 @@ dast_fit <-
              function(i) log.integrand(S_tot_samples[i,],val))
     }
 
-    par0_vec <- c(par0$beta, log(c(par0$sigma2, par0$phi)),
-                  log(par0$alpha/(1-par0$alpha)), log(par0$gamma))
 
-    if(is.null(fix_tau2)) {
-      par0_vec <- c(par0_vec, log(par0$tau2/par0$sigma2),
-                    log(par0$alpha/(1-par0$alpha)), log(par0$gamma))
+    if(!is.null(fix_tau2)) {
+      par0_vec <- c(par0$beta, log(c(par0$sigma2, par0$phi)))
+    } else {
+      par0_vec <- c(par0$beta, log(c(par0$sigma2, par0$phi, par0$tau2/par0$sigma2)))
     }
 
     if(n_re > 0) {
-      par0_vec <- c(par0_vec, log(par0$sigma2_re),
-                    log(par0$alpha/(1-par0$alpha)), log(par0$gamma))
+      if(is.null(fix_alpha)) {
+        par0_vec <- c(par0_vec,log(par0$sigma2_re),
+                      log(par0$alpha/(1-par0$alpha)), log(par0$gamma))
+      } else {
+        par0_vec <- c(par0_vec, log(par0$sigma2_re),
+                      log(par0$gamma))
+      }
+    } else {
+      if(is.null(fix_alpha)) {
+        par0_vec <- c(par0_vec,
+                      log(par0$alpha/(1-par0$alpha)), log(par0$gamma))
+      } else {
+        par0_vec <- c(par0_vec,
+                      log(par0$gamma))
+      }
     }
 
     log.f.tilde <- compute.log.f(par0_vec)
@@ -614,7 +678,11 @@ dast_fit <-
     grad.MC.log.lik <- function(par) {
       beta <- par[ind_beta]; mu <- as.numeric(D%*%beta)+cov_offset
       sigma2 <- exp(par[ind_sigma2])
-      alpha <- exp(par[ind_alpha])/(1+exp(par[ind_alpha]))
+      if(is.null(fix_alpha)) {
+        alpha <- exp(par[ind_alpha])/(1+exp(par[ind_alpha]))
+      } else {
+        alpha <- fix_alpha
+      }
       gamma <- exp(par[ind_gamma])
       mda_effect_all <- compute_mda_effect_derivatives(survey_times_data, mda_times,
                                        intervention = int_mat,
@@ -686,8 +754,10 @@ dast_fit <-
 
         grad.log.phi <- (t1.phi+0.5*as.numeric(t(S)%*%m2.phi%*%(S))/sigma2)*phi
 
-        der.alpha <- exp(par[ind_alpha])/((1+exp(par[ind_alpha]))^2)
-        grad.alpha.t <- der.alpha*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha)
+        if(is.null(fix_alpha)) {
+          der.alpha <- exp(par[ind_alpha])/((1+exp(par[ind_alpha]))^2)
+          grad.alpha.t <- der.alpha*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha)
+        }
 
         grad.log.gamma <- gamma*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_gamma)
 
@@ -706,7 +776,11 @@ dast_fit <-
           }
           out <- c(out,grad.log.sigma2_re)
         }
-        out <- c(out,grad.alpha.t, grad.log.gamma)
+        if(is.null(fix_alpha)) {
+          out <- c(out,grad.alpha.t, grad.log.gamma)
+        } else {
+          out <- c(out, grad.log.gamma)
+        }
         out
       }
       out <- rep(0,length(par))
@@ -720,6 +794,23 @@ dast_fit <-
     hess.MC.log.lik <- function(par) {
       beta <- par[ind_beta]; mu <- as.numeric(D%*%beta)+cov_offset
       sigma2 <- exp(par[ind_sigma2])
+      if(is.null(fix_alpha)) {
+        alpha <- exp(par[ind_alpha])/(1+exp(par[ind_alpha]))
+      } else {
+        alpha <- fix_alpha
+      }
+      gamma <- exp(par[ind_gamma])
+      mda_effect_all <- compute_mda_effect_derivatives(survey_times_data, mda_times,
+                                                       intervention = int_mat,
+                                                       alpha, gamma, kappa = power_val)
+      mda_effect <- mda_effect_all$effect
+      mda_der_alpha <- mda_effect_all$d_alpha
+      mda_der_gamma <- mda_effect_all$d_gamma
+      mda_der2_alpha <- mda_effect_all$d2_alpha
+      mda_der2_gamma <- mda_effect_all$d2_gamma
+      mda_der2_alpha_gamma <- mda_effect_all$d2_alpha_gamma
+
+
       if(!is.null(fix_tau2)) {
         nu2 <- fix_tau2/sigma2
       } else {
@@ -778,27 +869,51 @@ dast_fit <-
           }
         }
 
-        if(family=="poisson") {
-          h <- units_m*exp(eta)
-          h1 <- h
-        } else if(family=="binomial") {
-          h <- units_m*exp(eta)/(1+exp(eta))
-          h1 <- h/(1+exp(eta))
+        prob_star <- 1 / (1 + exp(-eta))
+        prob <- mda_effect * prob_star
+
+        # Compute derivative of log-likelihood with respect to eta
+        d_S <- (y/prob - (units_m-y)/(1-prob))*mda_effect*prob_star/(1+exp(eta))
+        d_S <- as.numeric(d_S)
+        d2_S <- (-y/(prob^2)-(units_m-y)/((1-prob)^2))*((mda_effect*prob_star/(1+exp(eta)))^2)+
+                (y/prob - (units_m-y)/(1-prob))*mda_effect*exp(eta)*(1-exp(eta))/((1+exp(eta))^3)
+
+        if(is.null(fix_alpha)) {
+          d_S_alpha <- (-y/(prob^2)-(units_m-y)/((1-prob)^2))*mda_der_alpha*prob_star*
+            mda_effect*prob_star/(1+exp(eta))+
+            (y/prob - (units_m-y)/(1-prob))*mda_der_alpha*prob_star/(1+exp(eta))
+
         }
+        d_S_gamma <- (-y/(prob^2)-(units_m-y)/((1-prob)^2))*mda_der_gamma*prob_star*
+          mda_effect*prob_star/(1+exp(eta))+
+          (y/prob - (units_m-y)/(1-prob))*mda_der_gamma*prob_star/(1+exp(eta))
+
 
         q.f_S <- t(S)%*%R.inv%*%S
 
-        grad.beta <-  t(D)%*%(y-h)
+        grad.beta <-  t(D)%*%d_S
 
         grad.log.sigma2 <- (-n_loc/(2*sigma2)+0.5*q.f_S/(sigma2^2))*sigma2
 
         grad.log.phi <- (t1.phi+0.5*as.numeric(t(S)%*%m2.phi%*%(S))/sigma2)*phi
+
+        if(is.null(fix_alpha)) {
+          der.alpha <- exp(par[ind_alpha])/((1+exp(par[ind_alpha]))^2)
+          grad.alpha.t <- der.alpha*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha)
+        }
+        grad.log.gamma <- gamma*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_gamma)
 
         g <- c(grad.beta,grad.log.sigma2,grad.log.phi)
         if(is.null(fix_tau2)) {
           grad.log.nu2 <-  (t1.nu2+0.5*as.numeric(t(S)%*%m2.nu2%*%(S))/sigma2)*nu2
           g <- c(g,grad.log.nu2)
         }
+        if(is.null(fix_alpha)) {
+          g <- c(g,grad.alpha.t, grad.log.gamma)
+        } else {
+          g <- c(g, grad.log.gamma)
+        }
+
 
         if(n_re > 0) {
           grad.log.sigma2_re <- rep(NA, n_re)
@@ -815,7 +930,33 @@ dast_fit <-
         grad2.log.lphi.lphi <-(t2.phi-0.5*t(S)%*%n2.phi%*%(S)/sigma2)*phi^2+
           grad.log.phi
 
-        H[ind_beta, ind_beta] <- -t(D)%*%(D*h1)
+        H[ind_beta, ind_beta] <- t(D)%*%(D*d2_S)
+
+        if(is.null(fix_alpha)) {
+          H[ind_beta, ind_alpha] <-
+          H[ind_alpha, ind_beta] <- t(D)%*%d_S_alpha*der.alpha
+
+          der2.alpha <- exp(par[ind_alpha])*(1-exp(par[ind_alpha]))/((1+exp(par[ind_alpha]))^3)
+          H[ind_alpha, ind_alpha] <- der2.alpha*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha)+
+            (der.alpha^2)*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der2_alpha+
+                                (-y/mda_effect^2-(units_m-y)*(prob_star^2)/(1-prob)^2)*mda_der_alpha^2)
+
+          H[ind_alpha, ind_gamma] <-
+            H[ind_gamma, ind_alpha] <-
+            (gamma*der.alpha)*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der2_alpha_gamma+
+                                    (-y/mda_effect^2-(units_m-y)*(prob_star^2)/(1-prob)^2)*mda_der_alpha*mda_der_gamma)
+
+        }
+
+
+        H[ind_beta, ind_gamma] <-
+        H[ind_gamma, ind_beta] <- t(D)%*%d_S_gamma*gamma
+
+
+        H[ind_gamma, ind_gamma] <- gamma*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_gamma)+
+          (gamma^2)*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der2_gamma+
+                          (-y/mda_effect^2-(units_m-y)*(prob_star^2)/(1-prob)^2)*mda_der_gamma^2)
+
         H[ind_sigma2, ind_sigma2] <-  grad2.log.lsigma2.lsigma2
         H[ind_sigma2,ind_phi] <-
           H[ind_phi, ind_sigma2] <- (grad.log.phi/phi-t1.phi)*(-phi)
@@ -858,7 +999,13 @@ dast_fit <-
     }
 
     start_cov_pars[-(1:2)] <- start_cov_pars[-(1:2)]/start_cov_pars[1]
-    start_par <- c(start_beta, log(start_cov_pars))
+    if(is.null(fix_alpha)) {
+      start_par <- c(start_beta, log(start_cov_pars),
+                     log(start_alpha/(1-start_alpha)), log(start_gamma))
+    } else {
+      start_par <- c(start_beta, log(start_cov_pars), log(start_gamma))
+    }
+
 
     out <- list()
     estim <- nlminb(start_par,
@@ -1240,8 +1387,7 @@ Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coo
     d_S <- as.numeric(d_S)
 
     grad_S_tot_r <- rep(NA,n_tot)
-    grad_S_tot_r[1:n_loc] <- as.numeric(-Sigma.inv%*%S+
-                                          sapply(1:n_loc,function(i) sum(d_S[C_S[i,]])))
+    grad_S_tot_r[1:n_loc] <- as.numeric(sapply(1:n_loc,function(i) sum(d_S[C_S[i,]])))
     if(n_re>0) {
       for(j in 1:n_re) {
         grad_S_tot_r[ind_re[[j]]] <- as.numeric(-S_re_list[[j]]/sigma2_re[[j]]+

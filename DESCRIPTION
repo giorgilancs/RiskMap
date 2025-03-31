@@ -1,7 +1,7 @@
 Package: RiskMap
 Type: Package
 Title: Geo-Statistical Modeling of Spatially Referenced Data
-Version: 0.1.0
+Version: 1.0.0
 Authors@R: 
   c(person(given = "Emanuele",
            family = "Giorgi",

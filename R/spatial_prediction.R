@@ -235,17 +235,36 @@ pred_over_grid <- function(object,
 
   diag(R) <- diag(R)+nu2
 
+  dast_model <- !is.null(object$power_val)
   if(object$family!="gaussian") {
     Sigma <- par_hat$sigma2*R
     Sigma_inv <- solve(Sigma)
     A <- C%*%Sigma_inv
 
-    simulation <-
-      Laplace_sampling_MCMC(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
-                            sigma2_re = par_hat$sigma2_re,
-                            ID_coords = object$ID_coords, ID_re = object$ID_re,
-                            family = object$family, control_mcmc = control_sim,
-                            messages = messages)
+    if(dast_model) {
+      alpha <- par_hat$alpha
+      if(is.null(alpha)) alpha <- object$fix_alpha
+
+      gamma <- par_hat$gamma
+
+      mda_effect <- compute_mda_effect(object$survey_times_data, object$mda_times,
+                                        object$int_mat,
+                                        alpha, gamma, kappa = object$power_val)
+      simulation <-
+        Laplace_sampling_MCMC_dast(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
+                              sigma2_re = par_hat$sigma2_re,
+                              mda_effect = mda_effect,
+                              ID_coords = object$ID_coords, ID_re = object$ID_re,
+                              control_mcmc = control_sim,
+                              messages = messages)
+    } else {
+      simulation <-
+        Laplace_sampling_MCMC(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
+                              sigma2_re = par_hat$sigma2_re,
+                              ID_coords = object$ID_coords, ID_re = object$ID_re,
+                              family = object$family, control_mcmc = control_sim,
+                              messages = messages)
+    }
     mu_cond_S <- A%*%t(simulation$samples$S)
     if(type=="marginal") {
       sd_cond_S <- sqrt(par_hat$sigma2-diag(A%*%t(C)))
@@ -410,6 +429,11 @@ pred_over_grid <- function(object,
   } else {
     out$re <- list(D_pred = NULL, samples = NULL)
   }
+  if(dast_model) {
+    out$mda_times <- object$mda_times
+    if(is.null(par_hat$alpha)) out$fix_alpha <- object$fix_alpha
+    out$power_val <- object$power_val
+  }
   out$inter_f <- inter_f
   out$family <- object$family
   out$par_hat <- par_hat
@@ -446,6 +470,9 @@ pred_target_grid <- function(object,
                         include_covariates = TRUE,
                         include_nugget = FALSE,
                         include_cov_offset = FALSE,
+                        include_mda_effect = TRUE,
+                        mda_grid = NULL,
+                        time_pred = NULL,
                         include_re = FALSE,
                         f_target = NULL,
                         pd_summary = NULL) {
@@ -454,6 +481,18 @@ pred_target_grid <- function(object,
     stop("The object passed to 'object' must be an output of
          the function 'pred_over_grid'")
   }
+
+  dast_model <- !is.null(object$par_hat$gamma)
+
+  if(dast_model) {
+    if(include_mda_effect & is.null(mda_grid)) {
+      stop("The MDA coverage must be specified for each point on the grid through the argument 'mda_grid'")
+    }
+    if(is.null(time_pred)) {
+      stop("For a DAST model, the time of prediction must be specified through the argument 'time_pred'")
+    }
+  }
+
 
   if(is.null(object$par_hat$tau2) &
      include_nugget) {
@@ -531,6 +570,7 @@ pred_target_grid <- function(object,
                                object$S_samples[,i])
   }
 
+
   if(include_re) {
     n_dim_re <- sapply(1:n_re, function(i) length(object$re$samples[[i]]))
 
@@ -555,6 +595,17 @@ pred_target_grid <- function(object,
   for(i in 1:n_f) {
     target_samples_i <-
       f_target[[i]](out$lp_samples)
+    if(include_mda_effect) {
+      alpha <- object$par_hat$alpha
+      if(is.null(alpha)) alpha <- object$fix_alpha
+      gamma <- object$par_hat$gamma
+      mda_effect_time_pred <- compute_mda_effect(rep(time_pred, n_pred),
+                                                 mda_times = object$mda_times,
+                              mda_grid, alpha = alpha,
+                              gamma = gamma, kappa = object$power_val)
+      target_samples_i <- target_samples_i*mda_effect_time_pred
+
+    }
     out$target[[paste(names_f[i])]] <- list()
     for(j in 1:n_summaries) {
       out$target[[paste(names_f[i])]][[paste(names_s[j])]] <-

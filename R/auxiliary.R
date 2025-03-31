@@ -433,9 +433,9 @@ coef.RiskMap <- function(object,...) {
     }
   }
   ind_sp <- c(ind_sigma2, ind_phi, ind_tau2)
+  object$estimate[ind_sp] <- exp(object$estimate[ind_sp])
 
   n_p <- length(object$estimate)
-  object$estimate[-ind_beta] <- exp(object$estimate[-ind_beta])
 
   if(n_re > 0) {
     for(i in 1:n_re) {
@@ -452,6 +452,27 @@ coef.RiskMap <- function(object,...) {
   }
   if(!is.null(ind_tau2)) res$tau2 <- object$estimate[ind_tau2]
   if(n_re>0) res$sigma2_re <- as.numeric(object$estimate[ind_sigma2_re])
+  dast_model <- !is.null(object$power_val)
+
+  if(dast_model) {
+    if(!is.null(ind_tau2)) {
+      if(is.null(object$fix_alpha)) {
+        ind_alpha <- p+n_re+4
+        ind_gamma <- p+n_re+5
+      } else {
+        ind_gamma <- p+n_re+4
+      }
+    } else {
+      if(is.null(object$fix_alpha)) {
+        ind_alpha <- p+n_re+3
+        ind_gamma <- p+n_re+4
+      } else {
+        ind_gamma <- p+n_re+3
+      }
+    }
+    if(is.null(object$fix_alpha)) res$alpha <- as.numeric(1/(1+exp(-object$estimate[ind_alpha])))
+    res$gamma <- as.numeric(exp(object$estimate[ind_gamma]))
+  }
   return(res)
 }
 
@@ -497,6 +518,7 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
   names(object$estimate)[ind_sigma2] <- "Spatial process var."
   ind_phi <- p+2
   names(object$estimate)[ind_phi] <- "Spatial corr. scale"
+  dast_model <- !is.null(object$power_val)
 
   if(is.null(object$fix_tau2)) {
     ind_tau2 <- p+3
@@ -514,6 +536,18 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
     } else {
       ind_sigma2_re <- (p+4):(p+3+n_re)
     }
+    if(dast_model) {
+      if(is.null(object$fix_alpha)) {
+        ind_alpha <- p+n_re+4
+        ind_gamma <- p+n_re+5
+      } else {
+        ind_gamma <- p+n_re+4
+      }
+
+    } else {
+      ind_alpha <- NULL
+      ind_gamma <- NULL
+    }
   } else {
     ind_tau2 <- NULL
     if(object$family=="gaussian") {
@@ -529,11 +563,24 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
     } else {
       ind_sigma2_re <- (p+3):(p+2+n_re)
     }
+    if(is.null(object$fix_alpha)) {
+      ind_alpha <- p+n_re+3
+      ind_gamma <- p+n_re+4
+    } else {
+      ind_alpha <- NULL
+      ind_gamma <- p+n_re+3
+    }
   }
   ind_sp <- c(ind_sigma2, ind_phi, ind_tau2)
 
+  if(dast_model) {
+    names(object$estimate)[ind_alpha] <- "Drop (alpha)"
+    if(!is.null(object$fix_alpha)) names(object$estimate)[ind_gamma] <- "Scale of the decay (gamma)"
+  }
   n_p <- length(object$estimate)
-  object$estimate[-ind_beta] <- exp(object$estimate[-ind_beta])
+  object$estimate[-c(ind_beta,ind_alpha, ind_gamma)] <-
+      exp(object$estimate[-c(ind_beta,ind_alpha, ind_gamma)])
+
 
   if(n_re > 0) {
     for(i in 1:n_re) {
@@ -560,7 +607,7 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
                         z.value = zval, p.value = 2 * pnorm(-abs(zval)))
 
   # Measurement error variance (linear model)
-  if(object$call$family=="gaussian") {
+  if(object$family=="gaussian") {
     if(is.null(object$fix_var_me)) {
       res$me <- cbind(Estimate = object$estimate[ind_sigma2_me],
                       'Lower limit' = exp(log(object$estimate[ind_sigma2_me])-qnorm(1-alpha/2)*se_par[ind_sigma2_me]),
@@ -584,8 +631,33 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
                        'Upper limit' = exp(log(object$estimate[ind_sigma2_re])+qnorm(1-alpha/2)*se_par[ind_sigma2_re]))
   }
 
+  if(dast_model) {
+    anti_logit <- function(x) 1/(1+exp(-x))
+
+    if(is.null(object$fix_alpha)) {
+      est_alpha <- anti_logit(object$estimate[ind_alpha])
+      lower_alpha <- anti_logit(object$estimate[ind_alpha]-qnorm(1-alpha/2)*se_par[ind_alpha])
+      upper_alpha <- anti_logit(object$estimate[ind_alpha]+qnorm(1-alpha/2)*se_par[ind_alpha])
+
+    } else {
+      est_alpha <- NULL
+      lower_alpha <- NULL
+      upper_alpha <- NULL
+      res$alpha <- object$fix_alpha
+    }
+    est_gamma <- exp(object$estimate[ind_gamma])
+    lower_gamma <- exp(object$estimate[ind_gamma]-qnorm(1-alpha/2)*se_par[ind_gamma])
+    upper_gamma <- exp(object$estimate[ind_gamma]+qnorm(1-alpha/2)*se_par[ind_gamma])
+
+    res$dast_par <- cbind(Estimate = c(est_alpha, est_gamma),
+                    'Lower limit' = c(lower_alpha, lower_gamma),
+                    'Upper limit' = c(upper_alpha, upper_gamma))
+    res$power_val <- object$power_val
+  }
+
   res$conf_level <- conf_level
   res$family <- object$family
+  res$dast <- dast_model
   res$kappa <- object$kappa
   res$log.lik <- object$log.lik
   res$cov_offset_used <- !is.null(object$cov_offset)
@@ -620,7 +692,12 @@ print.summary.RiskMap <- function(x, ...) {
   if(x$family=="gaussian") {
     cat("Linear geostatsitical model \n")
   } else if(x$family=="binomial") {
-    cat("Binomial geostatistical linear model \n")
+    if(x$dast) {
+      cat("Decay-adjusted spatio-temporal model \n")
+    } else {
+      cat("Binomial geostatistical linear model \n")
+    }
+
   } else if(x$family=="poisson") {
     cat("Poisson geostatistical linear model \n")
   }
@@ -648,6 +725,15 @@ print.summary.RiskMap <- function(x, ...) {
   printCoefmat(x$sp, Pvalues = FALSE)
   if(!is.null(x$tau2)) cat("Variance of the nugget effect fixed at",x$tau2,"\n")
 
+  if(x$dast) {
+    cat("\n MDA impact function \n")
+    cat("f(v) = alpha * exp(-(v/gamma)^delta) \n",sep="")
+    cat("The parameter delta is fixed to ",x$power_val,"\n",sep="")
+    if(!is.null(x$alpha)) {
+      cat("The drop (alpha) parameter of the MDA impact function is fixed at",x$alpha,"\n")
+    }
+    printCoefmat(x$dast_par, Pvalues = FALSE)
+  }
 
   if(!is.null(x$ranef)) {
     cat("\n Unstructured random effects \n")
@@ -1065,4 +1151,72 @@ plot_score <- function(object, which_score, which_model, ...) {
   return(out)
 }
 
+plot_mda <- function(object, n_sim = 10000, x_max = 10, conf_level = 0.95,
+                     lower_f = NULL, upper_f = NULL, ...) {
+  # Extract parameter estimates
+  par_hat <- coef(object)
+  n_par <- length(object$estimate)
 
+  if (is.null(par_hat$alpha)) {
+    ind_dast <- n_par
+    par_dast <- log(par_hat$gamma)
+  } else {
+    ind_dast <- (n_par-1):n_par
+    par_dast <- c(log(par_hat$alpha / (1 - par_hat$alpha)), log(par_hat$gamma))
+  }
+
+  # Generate parameter samples
+  Sigma_par <- as.matrix(object$covariance[ind_dast, ind_dast])
+  Sigma_par_sroot <- t(chol(Sigma_par))
+  par_hat_sim <- t(sapply(1:n_sim, function(i) par_dast + Sigma_par_sroot %*% rnorm(length(ind_dast))))
+  par_hat_sim <- as.matrix(par_hat_sim)
+
+  power_val <- object$power_val
+
+  # Define MDA impact function
+  f <- function(x, alpha, gamma, kappa) {
+    alpha * exp(-(x / gamma)^kappa)
+  }
+
+  # Generate x-axis values
+  x_vals <- seq(0, x_max, length.out = 100)
+
+  # Compute median and confidence intervals
+  f_vals <- apply(par_hat_sim, 2, function(params) {
+    if(!is.null(par_hat$alpha)) {
+      alpha <- exp(params[1]) / (1 + exp(params[1]))
+      gamma <- exp(params[2])
+    } else {
+      alpha <- object$fix_alpha
+      gamma <- exp(params[1])
+    }
+
+    sapply(x_vals, function(x) f(x, alpha, gamma, power_val))
+  })
+
+  median_f <- apply(f_vals, 1, median)
+  lower_q <- apply(f_vals, 1, function(x) quantile(x, probs = (1 - conf_level) / 2))
+  upper_q <- apply(f_vals, 1, function(x) quantile(x, probs = 1 - (1 - conf_level) / 2))
+
+  if(is.null(lower_f)) {
+    lower_f <- min(lower_q)
+  }
+
+  if(is.null(upper_f)) {
+    upper_f <- max(upper_q)
+  }
+  # Create data frame for ggplot
+  plot_data <- data.frame(
+    x = rep(x_vals, 3),
+    y = c(median_f, lower_q, upper_q),
+    type = rep(c("Median", "Lower", "Upper"), each = length(x_vals))
+  )
+
+  # Plot using ggplot
+  ggplot() +
+    geom_line(data = subset(plot_data, type == "Median"), aes(x = x, y = y), color = "black", size = 1) +
+    geom_ribbon(aes(x = x_vals, ymin = lower_q, ymax = upper_q), fill = "grey", alpha = 0.3) +
+    labs(x = "Years since MDA", y = "Prevalence Relative Reduction", title = "MDA Impact Function") +
+    coord_cartesian(ylim = c(lower_f, upper_f)) +
+    theme_minimal()
+}
