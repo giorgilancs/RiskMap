@@ -1151,6 +1151,7 @@ plot_score <- function(object, which_score, which_model, ...) {
   return(out)
 }
 
+##' @export
 plot_mda <- function(object, n_sim = 10000, x_max = 10, conf_level = 0.95,
                      lower_f = NULL, upper_f = NULL, ...) {
   # Extract parameter estimates

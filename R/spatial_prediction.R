@@ -2043,8 +2043,6 @@ summary.RiskMap.sim.res <- function(object, ...) {
 ##'
 ##' @return Invisibly returns `x`.
 ##'
-##' @method print summary.RiskMap.sim.res
-##' @export
 ##'
 ##' Print Simulation Results
 ##'
@@ -2058,7 +2056,6 @@ summary.RiskMap.sim.res <- function(object, ...) {
 ##'
 ##' @method print summary.RiskMap.sim.res
 ##' @export
-##'
 print.summary.RiskMap.sim.res <- function(x, ...) {
   cat("Summary of Simulation Results\n\n")
 

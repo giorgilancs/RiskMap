@@ -9,6 +9,9 @@ pred_target_grid(
   include_covariates = TRUE,
   include_nugget = FALSE,
   include_cov_offset = FALSE,
+  include_mda_effect = TRUE,
+  mda_grid = NULL,
+  time_pred = NULL,
   include_re = FALSE,
   f_target = NULL,
   pd_summary = NULL

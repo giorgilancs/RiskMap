@@ -147,7 +147,7 @@ dast_initial_value <- function(y, D, units_m, int_mat, survey_times_data,
 }
 
 
-
+##' @export
 dast <- function(formula,
                  data,
                  den = NULL, survey_times, mda_times, int_mat,
@@ -1239,7 +1239,7 @@ maxim.integrand.dast <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,
   return(out)
 }
 
-
+##' @export
 Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coords, ID_re = NULL,
                                        sigma2_re = NULL, control_mcmc,
                                        Sigma_pd=NULL, mean_pd=NULL, messages = TRUE) {
