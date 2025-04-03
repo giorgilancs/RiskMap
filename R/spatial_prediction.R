@@ -595,7 +595,7 @@ pred_target_grid <- function(object,
   for(i in 1:n_f) {
     target_samples_i <-
       f_target[[i]](out$lp_samples)
-    if(include_mda_effect) {
+    if(dast_model && include_mda_effect) {
       alpha <- object$par_hat$alpha
       if(is.null(alpha)) alpha <- object$fix_alpha
       gamma <- object$par_hat$gamma
