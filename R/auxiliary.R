@@ -574,8 +574,12 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
   ind_sp <- c(ind_sigma2, ind_phi, ind_tau2)
 
   if(dast_model) {
-    names(object$estimate)[ind_alpha] <- "Drop (alpha)"
-    if(!is.null(object$fix_alpha)) names(object$estimate)[ind_gamma] <- "Scale of the decay (gamma)"
+    if(!is.null(object$fix_alpha)){
+      names(object$estimate)[ind_gamma] <- "Scale of the decay (gamma)"
+    } else {
+      names(object$estimate)[ind_alpha] <- "Drop (alpha)"
+      names(object$estimate)[ind_gamma] <- "Scale of the decay (gamma)"
+    }
   }
   n_p <- length(object$estimate)
   object$estimate[-c(ind_beta,ind_alpha, ind_gamma)] <-
@@ -1151,10 +1155,27 @@ plot_score <- function(object, which_score, which_model, ...) {
   return(out)
 }
 
+##' @title Plot the estimated MDA impact function
+##'
+##' @description This function generates a plot of the estimated mass drug administration (MDA) impact function
+##' based on a fitted decay-adjusted spatio-temporal (DAST) model.
+##'
+##' @param object A fitted DAST model object, obtained as an output from the function \code{\link{dast}}.
+##' @param n_sim Number of posterior samples to simulate (default: 10000).
+##' @param x_max Maximum value for the x-axis (default: 10 years).
+##' @param conf_level Confidence level for the uncertainty interval (default: 0.95).
+##' @param lower_f Optional lower bound for the y-axis.
+##' @param upper_f Optional upper bound for the y-axis.
+##' @param ... Additional arguments (currently unused).
+##'
+##' @return A ggplot2 object visualizing the MDA impact function, showing the median and confidence interval of the estimated function.
+##'
 ##' @importFrom ggplot2 coord_cartesian geom_ribbon geom_line
 ##' @export
 plot_mda <- function(object, n_sim = 10000, x_max = 10, conf_level = 0.95,
                      lower_f = NULL, upper_f = NULL, ...) {
+
+  .data <- NULL
   # Extract parameter estimates
   par_hat <- coef(object)
   n_par <- length(object$estimate)
@@ -1184,7 +1205,7 @@ plot_mda <- function(object, n_sim = 10000, x_max = 10, conf_level = 0.95,
   x_vals <- seq(0, x_max, length.out = 100)
 
   # Compute median and confidence intervals
-  f_vals <- apply(par_hat_sim, 2, function(params) {
+  f_vals <- apply(par_hat_sim, 1, function(params) {
     if(!is.null(par_hat$alpha)) {
       alpha <- exp(params[1]) / (1 + exp(params[1]))
       gamma <- exp(params[2])
@@ -1192,7 +1213,6 @@ plot_mda <- function(object, n_sim = 10000, x_max = 10, conf_level = 0.95,
       alpha <- object$fix_alpha
       gamma <- exp(params[1])
     }
-
     sapply(x_vals, function(x) f(x, alpha, gamma, power_val))
   })
 
@@ -1200,24 +1220,21 @@ plot_mda <- function(object, n_sim = 10000, x_max = 10, conf_level = 0.95,
   lower_q <- apply(f_vals, 1, function(x) quantile(x, probs = (1 - conf_level) / 2))
   upper_q <- apply(f_vals, 1, function(x) quantile(x, probs = 1 - (1 - conf_level) / 2))
 
-  if(is.null(lower_f)) {
-    lower_f <- min(lower_q)
-  }
+  if(is.null(lower_f)) lower_f <- min(lower_q)
+  if(is.null(upper_f)) upper_f <- max(upper_q)
 
-  if(is.null(upper_f)) {
-    upper_f <- max(upper_q)
-  }
-  # Create data frame for ggplot
+  # Create a single data frame with ribbon bounds
   plot_data <- data.frame(
-    x = rep(x_vals, 3),
-    y = c(median_f, lower_q, upper_q),
-    type = rep(c("Median", "Lower", "Upper"), each = length(x_vals))
+    x = x_vals,
+    median = median_f,
+    lower = lower_q,
+    upper = upper_q
   )
 
-  # Plot using ggplot
-  ggplot() +
-    geom_line(data = subset(plot_data, type == "Median"), aes(x = x, y = y), color = "black", size = 1) +
-    geom_ribbon(aes(x = x_vals, ymin = lower_q, ymax = upper_q), fill = "grey", alpha = 0.3) +
+  # Plot with clean styling: no legend, single color for median line, grey ribbon
+  ggplot(plot_data, aes(x = .data$x)) +
+    geom_ribbon(aes(ymin = .data$lower, ymax = .data$upper), fill = "grey70", alpha = 0.3) +
+    geom_line(aes(y = median), color = "black", linewidth = 1) +
     labs(x = "Years since MDA", y = "Prevalence Relative Reduction", title = "MDA Impact Function") +
     coord_cartesian(ylim = c(lower_f, upper_f)) +
     theme_minimal()

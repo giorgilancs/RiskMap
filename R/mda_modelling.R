@@ -1,3 +1,4 @@
+
 compute_mda_effect <- function(survey_times_data, mda_times, intervention,
                                alpha, gamma, kappa) {
   n <- length(survey_times_data)
@@ -107,6 +108,7 @@ compute_mda_effect_derivatives <- function(survey_times_data, mda_times, interve
 }
 
 dast_initial_value <- function(y, D, units_m, int_mat, survey_times_data,
+                               penalty,
                                mda_times, fix_alpha, power_val) {
 
   p <- ncol(D)
@@ -122,13 +124,13 @@ dast_initial_value <- function(y, D, units_m, int_mat, survey_times_data,
       gamma <- exp(par[p+1])
     }
 
-    fact <- compute_mda_effect(survey_times_data, mda_times, intervention,
+    fact <- compute_mda_effect(survey_times_data, mda_times, int_mat,
                                alpha, gamma, kappa = power_val)
     eta <- as.numeric(D%*%beta)
     prob_star <- 1/(1+exp(-eta))
     prob <- fact*prob_star
 
-    out <- -sum(y*log(prob/(1-prob)) + units_m*log(1-prob))
+    out <- -(sum(y*log(prob/(1-prob)) + units_m*log(1-prob))-penalty[[1]](alpha))
     return(out)
   }
 
@@ -147,10 +149,68 @@ dast_initial_value <- function(y, D, units_m, int_mat, survey_times_data,
 }
 
 
+##' @title Fitting of decay-adjusted spatio-temporal (DAST) model
+##'
+##' @description
+##' The function fits a decay-adjusted spatio-temporal (DAST) model using Monte Carlo maximum liklihood.
+##' The DAST model allows for the incorporation of the temporal decay in diease prevalence due
+##' to the impact of mass drug administration (MDA). The function requires the full MDA history as detailed in the arguments below.
+##'
+##' @param formula A model formula specifying the response variable and predictors.
+##' @param data A `data.frame` or `sf` object containing the dataset.
+##' @param den The denominator for binomial models.
+##' @param survey_times The variable indicating the survey times.
+##' @param mda_times A vector specifying the mass drug administration (MDA) times.
+##' @param int_mat Intervention matrix specifying the timing and coverage of MDA; the dimension of the matrix
+##' must be \code{n * n_mda}, where \code{n} is the number of rows of \code{data} and \code{n_mda} is the length of \code{mda_times}.
+##' @param penalty Optional list specifying penalty functions for regularization, used in the estimation of the "drop" parameter \code{alpha}.
+##' @param drop Optional value used for fixing the "drop" parameter of the MDA impact function.
+##' @param power_val Value expressing the power of the MDA impact function.
+##' @param crs Optional coordinate reference system (CRS) for spatial data.
+##' @param convert_to_crs CRS to which spatial data should be converted.
+##' @param scale_to_km Logical; whether to scale distances to kilometers (default: `TRUE`).
+##' @param control_mcmc A list of MCMC control parameters, typically from `set_control_sim()`.
+##' @param par0 Optional list of initial parameter values.
+##' @param S_samples Number of posterior samples to retain.
+##' @param return_samples Logical; whether to return posterior samples (default: `TRUE`).
+##' @param messages Logical; whether to print messages (default: `TRUE`).
+##' @param start_pars List of starting values for parameters.
+##'
+##' @return A list containing model estimates, posterior samples, and metadata.
+##' @return A list containing:
+##'
+##' - `y`: Response variable values.
+##' - `D`: Covariate matrix.
+##' - `coords`: Unique spatial coordinates.
+##' - `mda_times`: MDA time points.
+##' - `survey_times_data`: Survey time data.
+##' - `int_mat`: Intervention matrix.
+##' - `ID_coords`: Indices of spatial locations.
+##' - `re`: Random effects levels (if applicable).
+##' - `ID_re`: Indices of random effects (if applicable).
+##' - `power_val`: Power of the MDA impact function.
+##' - `fix_tau2`: Fixed tau-squared value (if applicable).
+##' - `fix_alpha`: Fixed alpha value (if applicable).
+##' - `formula`: Model formula.
+##' - `crs`: Coordinate reference system.
+##' - `scale_to_km`: Indicator of distance scaling.
+##' - `data_sf`: Processed spatial dataset.
+##' - `family`: Model family (e.g., "binomial").
+##' - `kappa`: Smoothness parameter.
+##' - `units_m`: Denominator for binomial models.
+##' - `cov_offset`: Offset for covariates.
+##' - `call`: Function call.
+##' - `penalty`: Penalty function details (if applicable).
+##' - `posterior_samples`: Posterior samples if `return_samples = TRUE`.
+##'
+##' @seealso \code{\link{set_control_sim}}, \code{\link{summary.RiskMap}}, \code{\link{to_table}}
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @export
 dast <- function(formula,
                  data,
                  den = NULL, survey_times, mda_times, int_mat,
+                 penalty = NULL,
                  drop = NULL, power_val,
                  crs = NULL, convert_to_crs = NULL,
                  scale_to_km = TRUE,
@@ -212,6 +272,14 @@ dast <- function(formula,
     }
   }
 
+  if(is.null(penalty)) {
+    no_penalty <- TRUE
+    penalty <- list(pn = function(x) return(0),
+                    pn_d1 = function(x) return(0),
+                    pn_d2 = function(x) return(0))
+  } else {
+    no_penalty <- FALSE
+  }
 
   kappa <- inter_f$gp.spec$kappa
   if(kappa < 0) stop("kappa must be positive.")
@@ -336,6 +404,12 @@ dast <- function(formula,
     if(messages) message("Distances between locations are computed in meters ")
   }
 
+  if(is.null(start_pars) & !is.null(par0)) {
+    start_pars <- par0
+    if(length(par0$beta)!=ncol(D)) stop("the values passed to `beta` in par0 do not match the
+                                        variables specified in the formula")
+  }
+
   if(is.null(start_pars$beta)) {
     aux_data <- data.frame(y=y, units_m = units_m, D[,-1])
     if(length(cov_offset)==1) cov_offset_aux <- rep(cov_offset, n)
@@ -346,7 +420,7 @@ dast <- function(formula,
 
   if(is.null(start_pars$gamma) | (is.null(drop) & is.null(start_pars$alpha)) ) {
     dast_i <- dast_initial_value(y, D, units_m, int_mat = int_mat, survey_times_data,
-                                 fix_alpha = fix_alpha,
+                                 fix_alpha = fix_alpha,penalty=penalty,
                       mda_times, power_val = power_val)
     start_pars$beta <- dast_i$beta
     if(is.null(drop)) {
@@ -395,15 +469,12 @@ dast <- function(formula,
 
   if(is.null(par0)) {
     par0 <- start_pars
-  } else {
-    start_pars <- par0
-    if(length(par0$beta)!=ncol(D)) stop("the values passed to `beta` in par0 do not match the
-                                        variables specified in the formula")
   }
   res <- dast_fit(y = y, D, coords, units_m = units_m,
                   mda_times = mda_times, survey_times_data = survey_times_data,
                   int_mat = int_mat,
                   kappa = inter_f$gp.spec$kappa,
+                  penalty = penalty,
                       ID_coords, ID_re, s_unique, re_unique,
                       fix_tau2, fix_alpha,
                       return_samples = return_samples,
@@ -441,6 +512,11 @@ dast <- function(formula,
   } else {
     crs <- sf::st_crs(data)$input
   }
+  if(no_penalty) {
+    res$penalty <- NULL
+  } else {
+    res$penalty <- penalty
+  }
   res$crs <- crs
   res$scale_to_km <- scale_to_km
   res$data_sf <- data
@@ -454,7 +530,7 @@ dast <- function(formula,
 
 
 dast_fit <-
-  function(y, D, coords, units_m, kappa,
+  function(y, D, coords, units_m, kappa, penalty,
            mda_times, survey_times_data,
            int_mat,
            par0, cov_offset, power_val,
@@ -600,7 +676,7 @@ dast_fit <-
       llik <- sum(y*log(prob)+(units_m-y)*log(1-prob))
 
       q.f_S <- n_loc*log(val$sigma2)+val$ldetR+t(S)%*%val$R.inv%*%S/val$sigma2
-      out <- -0.5*(q.f_S+q.f_re)+llik
+      out <- -0.5*(q.f_S+q.f_re)+llik - val$pen_alpha
       return(out)
     }
 
@@ -628,6 +704,7 @@ dast_fit <-
       val$mda_effect <- compute_mda_effect(survey_times_data, mda_times,
                                        intervention = int_mat,
                                        alpha, gamma, kappa = power_val)
+      val$pen_alpha <- penalty[[1]](alpha)
       if(n_re > 0) {
         val$sigma2_re <- exp(par[ind_sigma2_re])
       }
@@ -756,7 +833,8 @@ dast_fit <-
 
         if(is.null(fix_alpha)) {
           der.alpha <- exp(par[ind_alpha])/((1+exp(par[ind_alpha]))^2)
-          grad.alpha.t <- der.alpha*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha)
+          grad.alpha.t <- der.alpha*(sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha) +
+                                     -penalty[[2]](alpha))
         }
 
         grad.log.gamma <- gamma*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_gamma)
@@ -789,7 +867,6 @@ dast_fit <-
       }
       out
     }
-
 
     hess.MC.log.lik <- function(par) {
       beta <- par[ind_beta]; mu <- as.numeric(D%*%beta)+cov_offset
@@ -899,7 +976,8 @@ dast_fit <-
 
         if(is.null(fix_alpha)) {
           der.alpha <- exp(par[ind_alpha])/((1+exp(par[ind_alpha]))^2)
-          grad.alpha.t <- der.alpha*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha)
+          grad.alpha.t <- der.alpha*(sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha)+
+                                     -penalty[[2]](alpha))
         }
         grad.log.gamma <- gamma*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_gamma)
 
@@ -937,9 +1015,10 @@ dast_fit <-
           H[ind_alpha, ind_beta] <- t(D)%*%d_S_alpha*der.alpha
 
           der2.alpha <- exp(par[ind_alpha])*(1-exp(par[ind_alpha]))/((1+exp(par[ind_alpha]))^3)
-          H[ind_alpha, ind_alpha] <- der2.alpha*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha)+
-            (der.alpha^2)*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der2_alpha+
-                                (-y/mda_effect^2-(units_m-y)*(prob_star^2)/(1-prob)^2)*mda_der_alpha^2)
+          H[ind_alpha, ind_alpha] <- der2.alpha*(sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha)-penalty[[2]](alpha))+
+            (der.alpha^2)*(sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der2_alpha+
+                                (-y/mda_effect^2-(units_m-y)*(prob_star^2)/(1-prob)^2)*mda_der_alpha^2)+
+                                -penalty[[3]](alpha))
 
           H[ind_alpha, ind_gamma] <-
             H[ind_gamma, ind_alpha] <-
@@ -997,6 +1076,7 @@ dast_fit <-
       (A-a%*%t(a))
 
     }
+
 
     start_cov_pars[-(1:2)] <- start_cov_pars[-(1:2)]/start_cov_pars[1]
     if(is.null(fix_alpha)) {
@@ -1239,7 +1319,6 @@ maxim.integrand.dast <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,
   return(out)
 }
 
-##' @export
 Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coords, ID_re = NULL,
                                        sigma2_re = NULL, control_mcmc,
                                        Sigma_pd=NULL, mean_pd=NULL, messages = TRUE) {

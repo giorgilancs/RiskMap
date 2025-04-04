@@ -26,6 +26,12 @@ pred_target_grid(
 
 \item{include_cov_offset}{Logical. Include the covariate offset in the predictive target.}
 
+\item{include_mda_effect}{Logical. Include the MDA effect in the predictive target using a DAST model; see \code{\link{dast}}.}
+
+\item{mda_grid}{Optional. Grid of MDA coverage values required for predictions using a DAST model; see \code{\link{dast}}.}
+
+\item{time_pred}{Optional. Time point for prediction required for predictions using a DAST model; see \code{\link{dast}}.}
+
 \item{include_re}{Logical. Include unstructured random effects in the predictive target.}
 
 \item{f_target}{Optional. List of functions to apply on the linear predictor samples.}
@@ -39,7 +45,7 @@ An object of class 'RiskMap_pred_target_grid' containing predicted values
 \description{
 Computes predictions over a regular spatial grid using outputs from the
 \code{\link{pred_over_grid}} function.
-This function allows for incorporating covariates, offsets, and optional
+This function allows for incorporating covariates, offsets, MDA effects, and optional
 unstructured random effects into the predictive target.
 }
 \seealso{

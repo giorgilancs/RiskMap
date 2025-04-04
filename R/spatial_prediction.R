@@ -1,6 +1,9 @@
-##' Prediction of the random effects components and covariates effects over a spatial grid using a fitted generalized linear Gaussian process model
+##' @importFrom stats setNames
+##' @importFrom utils head
+
+##' @title Prediction of the random effects components and covariates effects over a spatial grid using a fitted generalized linear Gaussian process model
 ##'
-##' This function computes predictions over a spatial grid using a fitted model
+##' @description This function computes predictions over a spatial grid using a fitted model
 ##' obtained from the \code{\link{glgpm}} function. It provides point predictions and uncertainty
 ##' estimates for the specified locations for each component of the model separately: the spatial random effects;
 ##' the unstructured random effects (if included); and the covariates effects.
@@ -443,17 +446,20 @@ pred_over_grid <- function(object,
   return(out)
 }
 
-##' Predictive Target Over a Regular Spatial Grid
+##' @title Predictive Target Over a Regular Spatial Grid
 ##'
-##' Computes predictions over a regular spatial grid using outputs from the
+##' @description Computes predictions over a regular spatial grid using outputs from the
 ##' \code{\link{pred_over_grid}} function.
-##' This function allows for incorporating covariates, offsets, and optional
+##' This function allows for incorporating covariates, offsets, MDA effects, and optional
 ##' unstructured random effects into the predictive target.
 ##'
 ##' @param object Output from `pred_over_grid`, a RiskMap.pred.re object.
 ##' @param include_covariates Logical. Include covariates in the predictive target.
 ##' @param include_nugget Logical. Include the nugget effect in the predictive target.
 ##' @param include_cov_offset Logical. Include the covariate offset in the predictive target.
+##' @param include_mda_effect Logical. Include the MDA effect in the predictive target using a DAST model; see \code{\link{dast}}.
+##' @param mda_grid Optional. Grid of MDA coverage values required for predictions using a DAST model; see \code{\link{dast}}.
+##' @param time_pred Optional. Time point for prediction required for predictions using a DAST model; see \code{\link{dast}}.
 ##' @param include_re Logical. Include unstructured random effects in the predictive target.
 ##' @param f_target Optional. List of functions to apply on the linear predictor samples.
 ##' @param pd_summary Optional. List of summary functions to apply on the predicted values.
@@ -465,7 +471,6 @@ pred_over_grid <- function(object,
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @importFrom Matrix solve
 ##' @export
-##'
 pred_target_grid <- function(object,
                         include_covariates = TRUE,
                         include_nugget = FALSE,
@@ -1675,7 +1680,7 @@ assess_sim <- function(obj_sim,
     stop("if spatial_scale='area' then a shape file of the area(s) must be passed to
          'shp'")
   }
-
+  units_m <- NULL
   if(any(pred_objective=="classify")) {
     if(is.null(categories)) stop("if pred_objective='class', a value for 'categories' must be specified")
     if (length(categories) < 3) {
