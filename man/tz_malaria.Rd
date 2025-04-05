@@ -6,7 +6,18 @@
 \title{Malaria Dataset from Tanzania Demographic Health Surveys 2015}
 \format{
 A data frame with 387 rows and 20 columns, containing the following variables:
-\itemize{
+The CRS of the UTM coordinates is 32736.
+}
+\source{
+\href{https://dhsprogram.com}{Tanzania Demographic Health Surveys 2015}, Giorgi E, Fronterrè C, Macharia PM, Alegana VA, Snow RW, Diggle PJ. 2021 Model building and assessment of the impact of covariates for disease prevalence mapping in low-resource settings: to explain and to predict. J. R. Soc. Interface 18: 20210104. \href{https://doi.org/10.1098/rsif.2021.0104}{https://doi.org/10.1098/rsif.2021.0104}
+}
+\usage{
+data(tz_malaria)
+}
+\description{
+This dataset contains information on malaria prevalence and associated variables from the 2015 Tanzania Demographic Health Surveys. The data includes geographical, demographic, environmental, and health-related variables.
+
+\describe{
   \item{cluster.number}{ Cluster number, identifying the survey cluster.}
   \item{Lat}{ Latitude of the survey cluster.}
   \item{Long}{ Longitude of the survey cluster.}
@@ -28,15 +39,5 @@ A data frame with 387 rows and 20 columns, containing the following variables:
   \item{utm_x}{ UTM (Universal Transverse Mercator) x-coordinate of the survey cluster.}
   \item{utm_y}{ UTM (Universal Transverse Mercator) y-coordinate of the survey cluster.}
 }
-The CRS of the UTM coordinates is 32736.
-}
-\source{
-\href{https://dhsprogram.com}{Tanzania Demographic Health Surveys 2015}, Giorgi E, Fronterrè C, Macharia PM, Alegana VA, Snow RW, Diggle PJ. 2021 Model building and assessment of the impact of covariates for disease prevalence mapping in low-resource settings: to explain and to predict. J. R. Soc. Interface 18: 20210104. \href{https://doi.org/10.1098/rsif.2021.0104}{https://doi.org/10.1098/rsif.2021.0104}
-}
-\usage{
-data(tz_malaria)
-}
-\description{
-This dataset contains information on malaria prevalence and associated variables from the 2015 Tanzania Demographic Health Surveys. The data includes geographical, demographic, environmental, and health-related variables.
 }
 \keyword{datasets}

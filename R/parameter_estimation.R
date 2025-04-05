@@ -1,10 +1,14 @@
+##' @importFrom utils flush.console
+##' @importFrom graphics points
+##' @importFrom sf st_nearest_feature
+
+
 ##' @title Estimation of Generalized Linear Gaussian Process Models
 ##' @description Fits generalized linear Gaussian process models to spatial data, incorporating spatial Gaussian processes with a Matern correlation function. Supports Gaussian, binomial, and Poisson response families.
 ##' @param formula A formula object specifying the model to be fitted. The formula should include fixed effects, random effects (specified using \code{re()}), and spatial effects (specified using \code{gp()}).
 ##' @param data A data frame or sf object containing the variables in the model.
 ##' @param family A character string specifying the distribution of the response variable. Must be one of "gaussian", "binomial", or "poisson".
-##' @param distr_offset Optional offset for binomial or Poisson distributions. If not provided, defaults to 1 for binomial.
-##' @param cov_offset Optional numeric vector for covariate offset.
+##' @param den Optional offset for binomial or Poisson distributions. If not provided, defaults to 1 for binomial.
 ##' @param crs Optional integer specifying the Coordinate Reference System (CRS) if data is not an sf object. Defaults to 4326 (long/lat).
 ##' @param convert_to_crs Optional integer specifying a CRS to convert the spatial coordinates.
 ##' @param scale_to_km Logical indicating whether to scale coordinates to kilometers. Defaults to TRUE.
@@ -55,8 +59,7 @@
 glgpm <- function(formula,
                  data,
                  family,
-                 distr_offset = NULL,
-                 cov_offset = NULL,
+                 den = NULL,
                  crs = NULL, convert_to_crs = NULL,
                  scale_to_km = TRUE,
                  control_mcmc = set_control_sim(),
@@ -134,28 +137,26 @@ glgpm <- function(formula,
 
   # Extract covariates matrix
   D <- as.matrix(model.matrix(attr(mf,"terms"),data=data))
-  if(is.null(cov_offset)) {
-    cov_offset <- 0
+
+  if(is.null(inter_f$offset)) {
+    cov_offset <- rep(0, nrow(data))
   } else {
-    if(!is.numeric(cov_offset)) stop("the variable passed to 'cov_offset'
-                                     must be numeric vector")
-    if(any(is.na(cov_offset))) stop("missing values not accepted in the offset")
-    if(length(cov_offset)!=n) stop("the offset values do not match the number of observations in the data")
+    cov_offset <- data[[inter_f$offset]]
   }
 
-  # Define distributional offset for Binomial and Poisson distributions
+  # Define denominators for Binomial and Poisson distributions
   if(nong) {
-    do_name <- deparse(substitute(distr_offset))
+    do_name <- deparse(substitute(den))
     if(do_name=="NULL") {
-      units_m <- 1
-      if(family=="binomial") warning("'distr_offset' is assumed to be 1 for all observations")
+      units_m <- rep(1, nrow(data))
+      if(family=="binomial") warning("'den' is assumed to be 1 for all observations \n")
     } else {
       units_m <- data[[do_name]]
     }
     if(is.integer(units_m)) units_m <- as.numeric(units_m)
-    if(!is.numeric(units_m)) stop("the variable passed to `distr_offset` must be numeric")
+    if(!is.numeric(units_m)) stop("the variable passed to `den` must be numeric")
     if(family=="binomial" & any(y > units_m)) stop("The counts identified by the outcome variable cannot be larger
-                              than `distr_offset` in the case of a Binomial distribution")
+                              than `den` in the case of a Binomial distribution")
     if(!inherits(control_mcmc,
                  what = "mcmc.RiskMap", which = FALSE)) {
       stop ("the argument passed to 'control_mcmc' must be an output
@@ -215,7 +216,7 @@ glgpm <- function(formula,
     data <- st_transform(data, crs = convert_to_crs)
     crs <- convert_to_crs
   }
-  if(messages) message("The CRS used is", as.list(st_crs(data))$input, "\n")
+  if(messages) message("The CRS used is ", as.list(st_crs(data))$input, "\n")
 
   coords_o <- st_coordinates(data)
   coords <- unique(coords_o)
@@ -237,9 +238,9 @@ glgpm <- function(formula,
   if(scale_to_km) {
     coords_o <- coords_o/1000
     coords <- coords/1000
-    if(messages) message("Distances between locations are computed in kilometers \n")
+    if(messages) message("Distances between locations are computed in kilometers ")
   } else {
-    if(messages) message("Distances between locations are computed in meters \n")
+    if(messages) message("Distances between locations are computed in meters ")
   }
 
 
@@ -249,7 +250,7 @@ glgpm <- function(formula,
     } else if(family=="binomial") {
       aux_data <- data.frame(y=y, units_m = units_m, D[,-1])
       if(length(cov_offset)==1) cov_offset_aux <- rep(cov_offset, n)
-      glm_fitted <- glm(cbind(y, units_m - y) ~ ., offset = cov_offset_aux,
+      glm_fitted <- glm(cbind(y, units_m - y) ~ ., offset = cov_offset,
                         data = aux_data, family = binomial)
       start_pars$beta <- stats::coef(glm_fitted)
     } else if(family=="poisson") {
@@ -1259,12 +1260,12 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
 ##' @param formula Model formula indicating the variables of the model to be simulated.
 ##' @param data Data frame or 'sf' object containing the variables in the model formula.
 ##' @param family Distribution family for the response variable. Must be one of 'gaussian', 'binomial', or 'poisson'.
-##' @param distr_offset Offset for the distributional part of the GLGPM. Required for 'binomial' and 'poisson' families.
+##' @param den Required for 'binomial' to denote the denominator (i.e. number of trials) of the Binomial distribution.
+##' For the 'poisson' family, the argument is optional and is used a multiplicative term to express the mean counts.
 ##' @param cov_offset Offset for the covariate part of the GLGPM.
 ##' @param crs Coordinate reference system (CRS) code for spatial data.
 ##' @param convert_to_crs CRS code to convert spatial data if different from 'crs'.
 ##' @param scale_to_km Logical; if TRUE, distances between locations are computed in kilometers; if FALSE, in meters.
-##' @param control_mcmc Control parameters for MCMC simulation if applicable.
 ##' @param sim_pars List of simulation parameters including 'beta', 'sigma2', 'tau2', 'phi', 'sigma2_me', and 'sigma2_re'.
 ##' @param messages Logical; if TRUE, display progress and informative messages.
 ##'
@@ -1284,11 +1285,10 @@ glgpm_sim <- function(n_sim,
                       formula = NULL,
                       data = NULL,
                       family = NULL,
-                      distr_offset = NULL,
+                      den = NULL,
                       cov_offset = NULL,
                       crs = NULL, convert_to_crs = NULL,
                       scale_to_km = TRUE,
-                      control_mcmc = NULL,
                       sim_pars = list(beta = NULL,
                                       sigma2 = NULL,
                                       tau2 = NULL,
@@ -1308,11 +1308,6 @@ glgpm_sim <- function(n_sim,
     scale_to_km <- model_fit$scale_to_km
   }
   inter_f <- interpret.formula(formula)
-
-  if(family=="binomial" | family=="poisson") {
-    if(is.null(control_mcmc)) stop("if family='binomial' or family='poisson'
-                                   'control_mcmc' must be provided")
-  }
 
   if(!inherits(formula,
                what = "formula", which = FALSE)) {
@@ -1413,39 +1408,31 @@ glgpm_sim <- function(n_sim,
   p <- ncol(D)
 
   if(!is.null(model_fit)) {
-    ind_beta <- 1:p
     par_hat <- coef(model_fit)
 
-    beta <- par_hat[ind_beta]
-    ind_sigma2 <- p+1
-    sigma2 <- par_hat[ind_sigma2]
-    ind_phi <- p+2
-    phi <- par_hat[ind_phi]
+    beta <- par_hat$beta
+    sigma2 <- par_hat$sigma2
+    phi <- par_hat$phi
 
     if(is.null(model_fit$fix_tau2)) {
-      ind_tau2 <- p+3
-      tau2 <- par_hat[ind_tau2]
+      tau2 <- par_hat$tau2
       if(is.null(model_fit$fix_var_me)) {
-        ind_sigma2_me <- p+4
-        sigma2_me <- par_hat[ind_sigma2_me]
+        sigma2_me <- par_hat$sigma2_me
       } else {
         sigma2_me <- model_fit$fix_var_me
       }
       if(n_re>0) {
-        ind_sigma2_re <- (p+5):(p+4+n_re)
-        sigma2_re <- par_hat[ind_sigma2_re]
+        sigma2_re <- par_hat$sigma2_me
       }
     } else {
       tau2 <- model_fit$fix_tau2
       if(is.null(model_fit$fix_var_me)) {
-        ind_sigma2_me <- p+3
-        sigma2_me <- par_hat[ind_sigma2_me]
+        sigma2_me <- par_hat$sigma2_me
       } else {
         sigma2_me <- model_fit$fix_var_me
       }
       if(n_re>0) {
-        ind_sigma2_re <- (p+4):(p+3+n_re)
-        sigma2_re <- par_hat[ind_sigma2_re]
+        sigma2_re <- par_hat$sigma2_re
       }
     }
   } else {
@@ -1489,9 +1476,10 @@ glgpm_sim <- function(n_sim,
 
 
 
-  if(all(table(ID_coords)==1) & (tau2!=0 & sigma2_me!=0)) {
-    stop("When there is only one observation per location, both the nugget and measurement error cannot
-         be estimate. Consider removing either one of them. ")
+  if(all(table(ID_coords)==1) & !is.null(tau2) &
+     !is.null(sigma2_me) && (tau2!=0 & sigma2_me!=0)) {
+    warning("When there is only one observation per location, both the nugget and measurement error cannot
+         be estimated. Consider removing either one of them. ")
   }
 
   if(scale_to_km) {
@@ -1538,12 +1526,39 @@ glgpm_sim <- function(n_sim,
     }
   }
 
+  if(family!="gaussian") {
+    if(!is.null(den))  {
+      do_name <- deparse(substitute(den))
+      units_m <- data[[do_name]]
+
+      if(is.integer(units_m)) units_m <- as.numeric(units_m)
+      if(!is.numeric(units_m)) stop("the variable passed to `den` must be numeric")
+
+
+    } else {
+      units_m <- model_fit$units_m
+    }
+
+  }
+
   y_sim <- matrix(NA, nrow=n_sim, ncol=n)
   if(family=="gaussian") {
-    lin_pred <- eta_sim
 
     for(i in 1:n_sim) {
-      y_sim[i,] <- lin_pred[i,] + sqrt(sigma2_me)*rnorm(n)
+      y_sim[i,] <- eta_sim[i,] + sqrt(sigma2_me)*rnorm(n)
+    }
+  } else {
+
+    if(family=="binomial") {
+      for(i in 1:n_sim) {
+        prob_i <- exp(eta_sim[i,])/(1+exp(eta_sim[i,]))
+        y_sim[i,] <- rbinom(n, size = units_m, prob = prob_i)
+      }
+    } else if(family=="poisson") {
+      for(i in 1:n_sim) {
+        mean_i <- exp(eta_sim[i,])/(1+exp(eta_sim[i,]))
+        y_sim[i,] <- rpois(n,lambda = units_m*mean_i)
+      }
     }
   }
 
@@ -1558,7 +1573,7 @@ glgpm_sim <- function(n_sim,
   }
   out <- list(data_sim = data_sim,
               S_sim = S_sim,
-              lin_pred_sim = lin_pred,
+              lin_pred_sim = eta_sim,
               beta = beta,
               sigma2 = sigma2,
               tau2 = tau2,
@@ -2003,6 +2018,7 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
 
     out <- as.numeric(-Sigma_w_inv%*%(W-mu_w)+
                    t(Sigma_pd_sroot)%*%grad_S_tot_r)
+
   }
 
   h <- control_mcmc$h
@@ -2020,9 +2036,13 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
   sim <- matrix(NA,nrow=n_samples, ncol=n_tot)
 
   if(messages) message("\n - Conditional simulation (burnin=",
-                     control_mcmc$burnin,", thin=",control_mcmc$thin,"): \n \n",sep="")
+                     control_mcmc$burnin,", thin=",control_mcmc$thin,"): \n ",sep="")
   h.vec <- rep(NA,n_sim)
   acc_prob <- rep(NA,n_sim)
+
+  # Progress bar dimensions
+  progress_bar_length <- 50
+
   for(i in 1:n_sim) {
     W_prop <- mean_curr+h*rnorm(n_tot)
     S_tot_prop <-  as.numeric(Sigma_pd_sroot%*%W_prop+mean_pd)
@@ -2050,8 +2070,24 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
     acc_prob[i] <- acc/i
     h.vec[i] <- h <- max(10e-20,h + c1.h*i^(-c2.h)*(acc/i-0.57))
 
+    # Update the progress bar
+    progress <- i / n_sim * 100
+    bar_length <- floor(progress / 100 * progress_bar_length)
+
+    # Construct the progress message
+    progress_message <- sprintf("\rProgress: [%-50s] %.2f%%",
+                                paste(rep("=", bar_length), collapse = ""),
+                                progress)
+
+    # Use cat() to write to stderr (equivalent to message())
+    if(messages) cat(progress_message, file = stderr())
+
+    # Ensure output is flushed to console
+    if(messages) flush.console()
+
   }
 
+  message("\n")
   out_sim <- list()
   out_sim$samples <- list()
   out_sim$samples$S <- sim[,1:n_loc]
@@ -2174,7 +2210,7 @@ function(y, D, coords, units_m, kappa,
   sigma2_re_0 <- par0$sigma2_re
 
 
-  if(messages) message("\n - Obtaining covariance matrix and mean for the proposal distribution of the MCMC \n \n")
+  if(messages) message("\n - Obtaining covariance matrix and mean for the proposal distribution of the MCMC \n")
   out_maxim <-
     maxim.integrand(y = y, units_m = units_m, Sigma = Sigma0, mu = mu0,
                     ID_coords = ID_coords, ID_re = ID_re,

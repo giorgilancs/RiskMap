@@ -4,6 +4,50 @@
 #' @importFrom stats poisson printCoefmat qnorm reformulate rnorm
 #' @importFrom stats runif sd step terms terms.formula update
 
+##' @title Convex Hull of an sf Object
+##'
+##' @description Computes the convex hull of an `sf` object, returning the boundaries of the smallest polygon that can enclose all geometries in the input.
+##'
+##' @param sf_object An `sf` data frame object containing geometries.
+##'
+##' @return An `sf` object representing the convex hull of the input geometries.
+##'
+##' @details The convex hull is the smallest convex polygon that encloses all points in the input `sf` object. This function computes the convex hull by first uniting all geometries in the input using `st_union()`, and then applying `st_convex_hull()` to obtain the polygonal boundary. The result is returned as an `sf` object containing the convex hull geometry.
+##'
+##' @seealso \code{\link[sf]{st_convex_hull}}, \code{\link[sf]{st_union}}
+##'
+##' @examples
+##' library(sf)
+##'
+##' # Create example sf object
+##' points <- st_sfc(st_point(c(0,0)), st_point(c(1,1)), st_point(c(2,2)), st_point(c(0,2)))
+##' sf_points <- st_sf(geometry = points)
+##'
+##' # Calculate the convex hull
+##' convex_hull_result <- convex_hull_sf(sf_points)
+##'
+##' # Plot the result
+##' plot(sf_points, col = 'blue', pch = 19)
+##' plot(convex_hull_result, add = TRUE, border = 'red')
+##' @importFrom sf st_geometry st_convex_hull st_sf st_union
+##' @export
+convex_hull_sf <- function(sf_object) {
+  # Check if the input is an sf object
+  if (!inherits(sf_object, "sf")) {
+    stop("`sf_object` must be an sf object")
+  }
+
+  # Get the geometry from the sf object
+  geometry <- st_geometry(sf_object)
+
+  # Compute the convex hull
+  convex_hull <- st_convex_hull(st_union(geometry))
+
+  # Return the convex hull as an sf object
+  return(st_sf(geometry = convex_hull))
+}
+
+
 ##' @title EPSG of the UTM Zone
 ##' @description Suggests the EPSG code for the UTM zone where the majority of the data falls.
 ##' @param data An object of class \code{sf} containing the coordinates.
@@ -14,32 +58,47 @@
 ##' Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @importFrom sf st_transform st_coordinates
 ##' @export
-propose_utm <- function(data) {
-  if(class(data)[1] != "sf") stop("'data' must be an object of class sf")
-  if(is.na(st_crs(data))) stop("the CRS of the data is missing and must be specified; see ?st_crs")
+propose_utm <- function (data) {
+  if (class(data)[1] != "sf")
+    stop("'data' must be an object of class sf")
+  if (is.na(st_crs(data)))
+    stop("the CRS of the data is missing and must be specified; see ?st_crs")
 
+  # Transform to WGS84 (EPSG:4326) to ensure coordinates are in lon/lat
   data <- st_transform(data, crs = 4326)
-  utm_z <- floor((st_coordinates(data)[,2] + 180) / 6) + 1
+
+  # Calculate UTM Zone
+  utm_z <- floor((st_coordinates(data)[, 1] + 180)/6) + 1
   utm_z_u <- unique(utm_z)
-  if(length(utm_z_u) > 1) {
+
+  if (length(utm_z_u) > 1) {
     tab_utm <- table(utm_z)
-    if(all(diff(tab_utm) == 0)) warning("an equal amount of locations falls in different UTM zones")
+    if (all(diff(tab_utm) == 0))
+      warning("An equal amount of locations falls in different UTM zones")
     utm_z_u <- as.numeric(names(which.max(tab_utm)))
   }
-  ns <- sign(st_coordinates(data)[,1])
+
+  # Determine Hemisphere (fixing the latitude check)
+  ns <- sign(st_coordinates(data)[, 2])  # Use latitude, not longitude
   ns_u <- unique(ns)
-  if(length(ns_u) > 1) {
+
+  if (length(ns_u) > 1) {
     tab_ns <- table(ns_u)
-    if(all(diff(tab_ns) == 0)) warning("an equal amount of locations falls north and south of the Equator")
+    if (all(diff(tab_ns) == 0))
+      warning("An equal amount of locations falls north and south of the Equator")
     ns_u <- as.numeric(names(which.max(tab_ns)))
   }
+
+  # Construct EPSG code for UTM zone
   if (ns_u == 1) {
-    out <- as.numeric(paste(326, utm_z_u, sep = ""))
-  } else if(ns_u == -1) {
-    out <- as.numeric(paste(327, utm_z_u, sep = ""))
+    out <- as.numeric(paste0(326, utm_z_u))  # Northern Hemisphere
+  } else if (ns_u == -1) {
+    out <- as.numeric(paste0(327, utm_z_u))  # Southern Hemisphere
   }
+
   return(out)
 }
+
 
 ##' @title Matern Correlation Function
 ##' @description Computes the Matern correlation function.
@@ -238,51 +297,65 @@ re <- function (...) {
   ret
 }
 
-
 interpret.formula <- function(formula) {
   p.env <- environment(formula)
   tf <- terms.formula(formula, specials = c("gp", "re"))
   terms <- attr(tf, "term.labels")
   nt <- length(terms)
+
   if (attr(tf, "response") > 0) {
     response <- as.character(attr(tf, "variables")[2])
   } else {
     response <- NULL
   }
+
   gp <- attr(tf, "specials")$gp
   re <- attr(tf, "specials")$re
   off <- attr(tf, "offset")
   vtab <- attr(tf, "factors")
-  if (length(gp) > 0)
+
+  if (length(gp) > 0) {
     for (i in 1:length(gp)) {
-      ind <- (1:nt)[as.logical(vtab[gp[i],])]
+      ind <- (1:nt)[as.logical(vtab[gp[i], ])]
       gp[i] <- ind
     }
-  if (length(re) > 0)
+  }
+
+  if (length(re) > 0) {
     for (i in 1:length(re)) {
-      ind <- (1:nt)[as.logical(vtab[re[i],])]
+      ind <- (1:nt)[as.logical(vtab[re[i], ])]
       re[i] <- ind
     }
+  }
+
   len.gp <- length(gp)
   len.re <- length(re)
-  ns <- len.gp + len.re
   gp.spec <- eval(parse(text = terms[gp]), envir = p.env)
   re.spec <- eval(parse(text = terms[re]), envir = p.env)
-  if(length(terms[-c(gp, re)])>0) {
+
+  if (length(off) > 0) {
+    offset <- as.character(attr(tf, "variables")[[off[i] + 1]])[2]
+  } else {
+    offset <- NULL
+  }
+
+  if (length(terms[-c(gp, re)]) > 0) {
     pf <- paste(response, "~", paste(terms[-c(gp, re)], collapse = " + "))
-  } else if (length(terms[-c(gp, re)])==0) {
+  } else if (length(terms[-c(gp, re)]) == 0) {
     pf <- paste(response, "~ 1")
   }
+
   if (attr(tf, "intercept") == 0) {
     pf <- paste(pf, "-1", sep = "")
   }
 
-  fake.formula <- pf
-  fake.formula <- as.formula(fake.formula, p.env)
-  ret <- list(pf = as.formula(pf, p.env),
-              gp.spec = gp.spec,
-              re.spec = re.spec,
-              response = response)
+  ret <- list(
+    pf = as.formula(pf, p.env),
+    gp.spec = gp.spec,
+    re.spec = re.spec,
+    offset = offset,
+    response = response
+  )
   ret
 }
 
@@ -360,9 +433,9 @@ coef.RiskMap <- function(object,...) {
     }
   }
   ind_sp <- c(ind_sigma2, ind_phi, ind_tau2)
+  object$estimate[ind_sp] <- exp(object$estimate[ind_sp])
 
   n_p <- length(object$estimate)
-  object$estimate[-ind_beta] <- exp(object$estimate[-ind_beta])
 
   if(n_re > 0) {
     for(i in 1:n_re) {
@@ -379,6 +452,27 @@ coef.RiskMap <- function(object,...) {
   }
   if(!is.null(ind_tau2)) res$tau2 <- object$estimate[ind_tau2]
   if(n_re>0) res$sigma2_re <- as.numeric(object$estimate[ind_sigma2_re])
+  dast_model <- !is.null(object$power_val)
+
+  if(dast_model) {
+    if(!is.null(ind_tau2)) {
+      if(is.null(object$fix_alpha)) {
+        ind_alpha <- p+n_re+4
+        ind_gamma <- p+n_re+5
+      } else {
+        ind_gamma <- p+n_re+4
+      }
+    } else {
+      if(is.null(object$fix_alpha)) {
+        ind_alpha <- p+n_re+3
+        ind_gamma <- p+n_re+4
+      } else {
+        ind_gamma <- p+n_re+3
+      }
+    }
+    if(is.null(object$fix_alpha)) res$alpha <- as.numeric(1/(1+exp(-object$estimate[ind_alpha])))
+    res$gamma <- as.numeric(exp(object$estimate[ind_gamma]))
+  }
   return(res)
 }
 
@@ -424,6 +518,7 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
   names(object$estimate)[ind_sigma2] <- "Spatial process var."
   ind_phi <- p+2
   names(object$estimate)[ind_phi] <- "Spatial corr. scale"
+  dast_model <- !is.null(object$power_val)
 
   if(is.null(object$fix_tau2)) {
     ind_tau2 <- p+3
@@ -441,6 +536,18 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
     } else {
       ind_sigma2_re <- (p+4):(p+3+n_re)
     }
+    if(dast_model) {
+      if(is.null(object$fix_alpha)) {
+        ind_alpha <- p+n_re+4
+        ind_gamma <- p+n_re+5
+      } else {
+        ind_gamma <- p+n_re+4
+      }
+
+    } else {
+      ind_alpha <- NULL
+      ind_gamma <- NULL
+    }
   } else {
     ind_tau2 <- NULL
     if(object$family=="gaussian") {
@@ -456,11 +563,28 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
     } else {
       ind_sigma2_re <- (p+3):(p+2+n_re)
     }
+    if(is.null(object$fix_alpha)) {
+      ind_alpha <- p+n_re+3
+      ind_gamma <- p+n_re+4
+    } else {
+      ind_alpha <- NULL
+      ind_gamma <- p+n_re+3
+    }
   }
   ind_sp <- c(ind_sigma2, ind_phi, ind_tau2)
 
+  if(dast_model) {
+    if(!is.null(object$fix_alpha)){
+      names(object$estimate)[ind_gamma] <- "Scale of the decay (gamma)"
+    } else {
+      names(object$estimate)[ind_alpha] <- "Drop (alpha)"
+      names(object$estimate)[ind_gamma] <- "Scale of the decay (gamma)"
+    }
+  }
   n_p <- length(object$estimate)
-  object$estimate[-ind_beta] <- exp(object$estimate[-ind_beta])
+  object$estimate[-c(ind_beta,ind_alpha, ind_gamma)] <-
+      exp(object$estimate[-c(ind_beta,ind_alpha, ind_gamma)])
+
 
   if(n_re > 0) {
     for(i in 1:n_re) {
@@ -487,7 +611,7 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
                         z.value = zval, p.value = 2 * pnorm(-abs(zval)))
 
   # Measurement error variance (linear model)
-  if(object$call$family=="gaussian") {
+  if(object$family=="gaussian") {
     if(is.null(object$fix_var_me)) {
       res$me <- cbind(Estimate = object$estimate[ind_sigma2_me],
                       'Lower limit' = exp(log(object$estimate[ind_sigma2_me])-qnorm(1-alpha/2)*se_par[ind_sigma2_me]),
@@ -511,8 +635,33 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
                        'Upper limit' = exp(log(object$estimate[ind_sigma2_re])+qnorm(1-alpha/2)*se_par[ind_sigma2_re]))
   }
 
+  if(dast_model) {
+    anti_logit <- function(x) 1/(1+exp(-x))
+
+    if(is.null(object$fix_alpha)) {
+      est_alpha <- anti_logit(object$estimate[ind_alpha])
+      lower_alpha <- anti_logit(object$estimate[ind_alpha]-qnorm(1-alpha/2)*se_par[ind_alpha])
+      upper_alpha <- anti_logit(object$estimate[ind_alpha]+qnorm(1-alpha/2)*se_par[ind_alpha])
+
+    } else {
+      est_alpha <- NULL
+      lower_alpha <- NULL
+      upper_alpha <- NULL
+      res$alpha <- object$fix_alpha
+    }
+    est_gamma <- exp(object$estimate[ind_gamma])
+    lower_gamma <- exp(object$estimate[ind_gamma]-qnorm(1-alpha/2)*se_par[ind_gamma])
+    upper_gamma <- exp(object$estimate[ind_gamma]+qnorm(1-alpha/2)*se_par[ind_gamma])
+
+    res$dast_par <- cbind(Estimate = c(est_alpha, est_gamma),
+                    'Lower limit' = c(lower_alpha, lower_gamma),
+                    'Upper limit' = c(upper_alpha, upper_gamma))
+    res$power_val <- object$power_val
+  }
+
   res$conf_level <- conf_level
   res$family <- object$family
+  res$dast <- dast_model
   res$kappa <- object$kappa
   res$log.lik <- object$log.lik
   res$cov_offset_used <- !is.null(object$cov_offset)
@@ -547,7 +696,12 @@ print.summary.RiskMap <- function(x, ...) {
   if(x$family=="gaussian") {
     cat("Linear geostatsitical model \n")
   } else if(x$family=="binomial") {
-    cat("Binomial geostatistical linear model \n")
+    if(x$dast) {
+      cat("Decay-adjusted spatio-temporal model \n")
+    } else {
+      cat("Binomial geostatistical linear model \n")
+    }
+
   } else if(x$family=="poisson") {
     cat("Poisson geostatistical linear model \n")
   }
@@ -575,6 +729,15 @@ print.summary.RiskMap <- function(x, ...) {
   printCoefmat(x$sp, Pvalues = FALSE)
   if(!is.null(x$tau2)) cat("Variance of the nugget effect fixed at",x$tau2,"\n")
 
+  if(x$dast) {
+    cat("\n MDA impact function \n")
+    cat("f(v) = alpha * exp(-(v/gamma)^delta) \n",sep="")
+    cat("The parameter delta is fixed to ",x$power_val,"\n",sep="")
+    if(!is.null(x$alpha)) {
+      cat("The drop (alpha) parameter of the MDA impact function is fixed at",x$alpha,"\n")
+    }
+    printCoefmat(x$dast_par, Pvalues = FALSE)
+  }
 
   if(!is.null(x$ranef)) {
     cat("\n Unstructured random effects \n")
@@ -586,29 +749,493 @@ print.summary.RiskMap <- function(x, ...) {
 }
 
 
-##' @title Create LaTeX Table from Model Fit
-##' @description Converts a "RiskMap" model fit into an \code{xtable} object, which can then be printed as a LaTeX or HTML table.
-##' @param object An object of class "RiskMap" obtained as a result of a call to \code{\link{glgpm}}.
-##' @param ... Additional arguments to be passed to \code{\link[xtable]{xtable}}.
-##' @details This function takes a fitted "RiskMap" model and converts it into an \code{xtable} object. The resulting table includes:
+##' @title Generate LaTeX Tables from RiskMap Model Fits and Validation
+##' @description Converts a fitted "RiskMap" model or cross-validation results into an \code{xtable} object, formatted for easy export to LaTeX or HTML.
+##' @param object An object of class "RiskMap" resulting from a call to \code{\link{glgpm}}, or a summary object of class "summary.RiskMap.spatial.cv" containing cross-validation results.
+##' @param ... Additional arguments to be passed to \code{\link[xtable]{xtable}} for customization.
+##' @details This function creates a summary table from a fitted "RiskMap" model or cross-validation results for multiple models, returning it as an \code{xtable} object.
+##'
+##' When the input is a "RiskMap" model object, the table includes:
 ##' \itemize{
 ##'   \item Regression coefficients with their estimates, confidence intervals, and p-values.
-##'   \item Spatial process parameters.
-##'   \item Random effects variances.
+##'   \item Parameters for the spatial process.
+##'   \item Random effect variances.
 ##'   \item Measurement error variance, if applicable.
 ##' }
-##' The \code{xtable} object can be customized further using additional arguments and then printed as a LaTeX or HTML table.
-##' @return An object of class "xtable" which inherits the \code{data.frame} class and contains several additional attributes specifying the table formatting options.
+##'
+##' When the input is a cross-validation summary object ("summary.RiskMap.spatial.cv"), the table includes:
+##' \itemize{
+##'   \item A row for each model being compared.
+##'   \item Performance metrics such as CRPS and SCRPS for each model.
+##' }
+##'
+##' The resulting \code{xtable} object can be further customized with additional formatting options and printed as a LaTeX or HTML table for reports or publications.
+##' @return An object of class "xtable", which contains the formatted table as a \code{data.frame} and several attributes specifying table formatting options.
 ##' @importFrom xtable xtable
 ##' @export
-##' @seealso \code{\link{glgpm}}, \code{\link[xtable]{xtable}}
+##' @seealso \code{\link{glgpm}}, \code{\link[xtable]{xtable}}, \code{\link{summary.RiskMap.spatial.cv}}
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
-##'
 to_table <- function(object, ...) {
   summary_out <- summary(object)
-  tab <- rbind(summary_out$reg_coef[,1:3], summary_out$sp, summary_out$ranef,
-               summary_out$me)
-  out <- xtable(x = tab,...)
+  if(inherits(summary_out,
+               what = "summary.RiskMap", which = FALSE)) {
+    tab <- rbind(summary_out$reg_coef[,1:3], summary_out$sp, summary_out$ranef,
+                 summary_out$me)
+    out <- xtable(x = tab,...)
+  } else if (inherits(summary_out,
+                      what = "summary.RiskMap.spatial.cv", which = FALSE)) {
+    n_models <- nrow(summary_out)
+    n_metrics <- ncol(summary_out)
+    model_names <- rownames(summary_out)
+    metric_names <- toupper(colnames(summary_out))
+    tab <- data.frame(Model = model_names)
+    for(i in 1:n_metrics) {
+      tab[[paste(metric_names[i])]] <- summary_out[,i]
+    }
+    out <- xtable(x = tab,...)
+  }
   return(out)
+}
+
+##' @title Compute Unique Coordinate Identifiers
+##'
+##' @description
+##' This function identifies unique coordinates from a `sf` (simple feature) object
+##' and assigns an identifier to each coordinate occurrence. It returns a list
+##' containing the identifiers for each row and a vector of unique identifiers.
+##'
+##' @param data_sf An `sf` object containing geometrical data from which coordinates are extracted.
+##'
+##' @return A list with the following elements:
+##' \describe{
+##'   \item{ID_coords}{An integer vector where each element corresponds to a row in the input,
+##'   indicating the index of the unique coordinate in the full set of unique coordinates.}
+##'   \item{s_unique}{An integer vector containing the unique identifiers of all distinct coordinates.}
+##' }
+##'
+##' @details
+##' The function extracts the coordinate pairs from the `sf` object and determines the unique
+##' coordinates. It then assigns each row in the input data an identifier corresponding
+##' to the unique coordinate it matches.
+##'
+##' @importFrom sf st_coordinates
+##' @export
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##'
+##'
+compute_ID_coords <- function(data_sf) {
+  if(!inherits(data_sf,
+               what = c("sfc","sf"), which = FALSE)) {
+    stop("The object passed to 'grid_pred' must be an object
+         of class 'sfc'")
+  }
+  coords_o <- st_coordinates(data_sf)
+  coords <- unique(coords_o)
+
+  m <- nrow(coords_o)
+  ID_coords <- sapply(1:m, function(i)
+    which(coords_o[i,1]==coords[,1] &
+            coords_o[i,2]==coords[,2]))
+  out <- list()
+  out$ID_coords <- ID_coords
+  out$s_unique <- unique(ID_coords)
+  return(out)
+}
+
+
+##' @title Summarize Cross-Validation Scores for Spatial RiskMap Models
+##'
+##' @description This function summarizes cross-validation scores for different spatial models obtained
+##' from \code{\link{assess_pp}}.
+##'
+##' @param object A `RiskMap.spatial.cv` object containing cross-validation scores for each
+##'               model, as obtained from \code{\link{assess_pp}}.
+##' @param view_all Logical. If `TRUE`, stores the average scores across test sets for each
+##'                 model alongside the overall average across all models. Defaults to `TRUE`.
+##' @param ... Additional arguments passed to or from other methods.
+##'
+##' @details
+##' The function computes and returns a matrix where rows correspond to models and columns
+##' correspond to performance metrics (e.g., CRPS, SCRPS). Scores are weighted by subset sizes
+##' to compute averages. Attributes of the returned object include:
+##' \itemize{
+##'   \item `test_set_means`: A list of average scores for each test set and model.
+##'   \item `overall_averages`: Overall averages for each metric across all models.
+##'   \item `view_all`: Indicates whether averages across test sets are available for visualization.
+##' }
+##'
+##' @return A matrix of summary scores with models as rows and metrics as columns, with class
+##' `"summary.RiskMap.spatial.cv"`.
+##'
+##' @seealso \code{\link{assess_pp}}
+##'
+##' @export
+##' @method summary RiskMap.spatial.cv
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+summary.RiskMap.spatial.cv <- function(object, view_all = TRUE, ...) {
+  model_names <- names(object$model)
+  n_models <- length(model_names)
+
+  metric_names <- names(object$model[[1]]$score)
+  if (is.null(metric_names)) stop("No metrics of predictive performance were computed when running 'assess_pp'")
+  n_metrics <- length(metric_names)
+
+  res <- matrix(NA, ncol = n_metrics, nrow = n_models)
+  colnames(res) <- metric_names
+  rownames(res) <- model_names
+
+  test_set_means <- list()
+
+  n_subs <- length(object$model[[1]]$score[[1]])
+  w <- unlist(lapply(object$model[[1]]$score[[1]], length))
+
+  for (i in 1:n_models) {
+    model_scores <- list()
+    for (j in 1:n_metrics) {
+      score_j <- rep(NA, n_subs)
+      for (h in 1:n_subs) {
+        score_j[h] <- mean(object$model[[i]]$score[[j]][[h]])
+      }
+      model_scores[[j]] <- score_j
+      res[i, j] <- sum(w * score_j) / sum(w)
+    }
+    test_set_means[[model_names[i]]] <- model_scores
+  }
+
+  overall_averages <- colMeans(res, na.rm = TRUE)
+
+  # Attach additional attributes for printing
+  attr(res, "test_set_means") <- test_set_means
+  attr(res, "overall_averages") <- overall_averages
+  attr(res, "view_all") <- view_all
+
+  class(res) <- "summary.RiskMap.spatial.cv"
+  return(res)
+}
+
+##' @title Print Summary of RiskMap Spatial Cross-Validation Scores
+##'
+##' @description This function prints the matrix of cross-validation scores produced by
+##' `summary.RiskMap.spatial.cv` in a readable format.
+##'
+##' @param x An object of class `"summary.RiskMap.spatial.cv"`, typically the output of
+##'          `summary.RiskMap.spatial.cv`.
+##' @param ... Additional arguments passed to or from other methods.
+##'
+##' @details
+##' This method is primarily used to format and display the summary score matrix,
+##' printing it to the console. It provides a clear view of the cross-validation performance
+##' metrics across different spatial models.
+##'
+##' @return This function is used for its side effect of printing to the console. It does not
+##'         return a value.
+##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
+##' @export
+##' @method print summary.RiskMap.spatial.cv
+print.summary.RiskMap.spatial.cv <- function(x, ...) {
+  # Extract attributes
+  test_set_means <- attr(x, "test_set_means")
+  overall_averages <- attr(x, "overall_averages")
+  view_all <- attr(x, "view_all")
+
+  cat("Summary of Cross-Validation Scores\n")
+  cat("----------------------------------\n")
+
+  for (model_name in names(test_set_means)) {
+    cat(sprintf("Model: %s\n", model_name))
+
+    if (view_all) {
+      # Print scores for each test set
+      model_test_set_means <- test_set_means[[model_name]]
+      n_test_sets <- length(model_test_set_means[[1]])  # Number of test sets (assumes all metrics have same length)
+
+      for (test_set_idx in seq_len(n_test_sets)) {
+        cat(sprintf("  Test Set %d:\n", test_set_idx))
+        for (metric_idx in seq_along(model_test_set_means)) {
+          metric_name <- colnames(x)[metric_idx]
+          test_set_value <- model_test_set_means[[metric_idx]][test_set_idx]
+          cat(sprintf("    %s: %.4f\n", metric_name, test_set_value))
+        }
+      }
+    }
+
+    # Print overall average across test sets for the model
+    cat("  Overall average across test sets:\n")
+    for (metric_idx in seq_along(overall_averages)) {
+      metric_name <- colnames(x)[metric_idx]
+      overall_avg <- x[model_name, metric_idx]
+      cat(sprintf("    %s: %.4f\n", metric_name, overall_avg))
+    }
+    cat("\n")
+  }
+}
+
+
+
+
+##' @title Plot AnPIT Results from Model Validation
+##'
+##' @description This function plots AnPIT results from a `RiskMap.spatial.cv` object obtained using the `assess_pp` function.
+##'
+##' @param object A `RiskMap.spatial.cv` object containing validation results.
+##' @param mode Character string specifying the mode of plotting: `"average"` (average AnPIT across test sets),
+##' `"single"` (AnPIT for a specific test set), or `"all"` (all test sets).
+##' @param test_set Integer specifying the test set to plot when `mode = "single"`.
+##' @param model_name Character string specifying the name of the model to plot. If `NULL`, all models are plotted.
+##' @param combine_panels Logical specifying whether to combine all models into a single plot when `mode = "average"`. Defaults to `FALSE`.
+##'
+##' @return A ggplot2 plot or a grid of plots.
+##' @importFrom ggplot2 ggplot aes geom_line geom_abline labs theme_minimal guides guide_legend
+##' @importFrom ggpubr ggarrange
+##' @importFrom dplyr filter group_by summarize %>%
+##' @export
+plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = NULL, combine_panels = FALSE) {
+  # Initailize global variables
+  model <- NULL
+  u_val <- NULL
+  AnPIT <- NULL
+
+  if (!inherits(object, "RiskMap.spatial.cv")) {
+    stop("`object` must be a 'Riskmap.spatial.cv' object obtained as an output from the function 'assess_pp'")
+  }
+
+  if (is.null(object$model[[1]]$AnPIT)) {
+    stop("The AnPIT was not computed when running the 'assess_pp' function")
+  }
+
+  # Ensure model_name matches an existing model
+  if (!is.null(model_name)) {
+    if (!model_name %in% names(object$model)) {
+      stop(paste("Model name", model_name, "not found in the provided object."))
+    }
+    object <- list(model_name = object$model[[model_name]])
+    names(object) <- model_name
+  }
+
+  # Create a data frame for plotting
+  plot_data <- do.call(rbind, lapply(seq_along(object)[-length(object)], function(i) {
+    AnPIT_list <- object$model[[i]]$AnPIT
+    model_name <- names(object$model)[i]
+    do.call(rbind, lapply(seq_along(AnPIT_list), function(j) {
+      test_set_data <- AnPIT_list[[j]]
+      if (length(test_set_data) == 0) return(NULL)
+      data.frame(
+        u_val = seq(0, 1, length.out = length(test_set_data)),
+        AnPIT = test_set_data,
+        test_set = j,
+        model = model_name
+      )
+    }))
+  }))
+
+  # Ensure plot_data is valid
+  if (is.null(plot_data) || nrow(plot_data) == 0) {
+    stop("No valid AnPIT data available for plotting.")
+  }
+
+  id_line <- geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red")
+
+  if (mode == "average" && combine_panels) {
+    # Combine all models into a single plot
+    avg_data <- plot_data %>%
+      group_by(model, u_val) %>%
+      summarize(AnPIT = mean(AnPIT, na.rm = TRUE), .groups = 'drop')
+
+    p <- ggplot(avg_data, aes(x = u_val, y = AnPIT, color = model)) +
+      geom_line() +
+      labs(title = "Average AnPIT Across Models", x = "", y = "AnPIT") +
+      theme_minimal() +
+      guides(color = guide_legend(title = "Model")) +
+      id_line
+    return(p)
+  }
+
+  # Handle other modes or non-combined "average"
+  plots <- list()
+  for (model_id in unique(plot_data$model)) {
+    model_data <- plot_data %>% filter(model == model_id)
+
+    if (mode == "average") {
+      avg_data <- model_data %>%
+        group_by(u_val) %>%
+        summarize(AnPIT = mean(AnPIT, na.rm = TRUE), .groups = 'drop')
+      p <- ggplot(avg_data, aes(x = u_val, y = AnPIT)) +
+        geom_line() +
+        labs(title = paste("Model", model_id, "- Average AnPIT"), x = "", y = "AnPIT") +
+        theme_minimal()
+
+    } else if (mode == "single") {
+      if (is.null(test_set)) {
+        stop("`test_set` must be provided when `mode` is 'single'")
+      }
+      model_data <- model_data %>% filter(test_set == !!test_set)
+
+      if (nrow(model_data) == 0) {
+        stop(paste("No data available for test_set:", test_set, "in model", model_id))
+      }
+
+      p <- ggplot(model_data, aes(x = u_val, y = AnPIT)) +
+        geom_line(color = "blue") +
+        labs(title = paste("Model", model_id, "- Test Set:", test_set), x = "", y = "AnPIT") +
+        theme_minimal()
+
+    } else if (mode == "all") {
+      p <- ggplot(model_data, aes(x = u_val, y = AnPIT, color = as.factor(test_set))) +
+        geom_line() +
+        labs(title = paste("Model", model_id, "- All Test Sets"), x = "", y = "AnPIT") +
+        theme_minimal() +
+        guides(color = guide_legend(title = "Test Set"))
+
+    } else {
+      stop("Invalid `mode`. Use 'average', 'single', or 'all'.")
+    }
+
+    p <- p + id_line
+    plots[[model_id]] <- p
+  }
+
+  n_plots <- length(plots)
+  ncol <- ifelse(n_plots == 1, 1, 2)
+  nrow <- ceiling(n_plots / ncol)
+  grid_plot <- ggpubr::ggarrange(plotlist = plots, ncol = ncol, nrow = nrow)
+
+  return(grid_plot)
+}
+
+##' @title Plot Spatial Scores for a Specific Model and Metric
+##'
+##' @description This function visualizes spatial scores for a specified model and metric.
+##' It combines test set data, handles duplicate locations by averaging scores,
+##' and creates a customizable map using ggplot2.
+##'
+##' @param object A list containing test sets and model scores. The structure should include
+##'   `object$test_set` (list of sf objects) and `object$model[[which_model]]$score[[which_score]]`.
+##' @param which_score A string specifying the score to visualize. Must match a score computed in the model.
+##' @param which_model A string specifying the model whose scores to visualize.
+##' @param ... Additional arguments to customize ggplot, such as `scale_color_gradient` or `scale_color_manual`.
+##' @return A ggplot object visualizing the spatial distribution of the specified score.
+##' @export
+plot_score <- function(object, which_score, which_model, ...) {
+  geometry <- NULL
+  score <- NULL
+
+  # Check if "which_score" exists
+  if (!which_score %in% names(object$model[[which_model]]$score)) {
+    stop(paste("Error: The score", shQuote(which_score), "was not computed for model", shQuote(which_model)))
+  }
+
+  # Extract the test sets and number of test sets
+  test_sets <- object$test_set
+  n_test <- length(test_sets)
+
+  # Combine the data and add the score variable
+  data_full <- test_sets[[1]]
+  data_full$score <- object$model[[which_model]]$score[[which_score]][[1]]
+
+  if (n_test > 1) {
+    for (i in 1:n_test) {
+      test_sets[[i]]$score <- object$model[[which_model]]$score[[which_score]][[i]]
+      data_full <- rbind(data_full, test_sets[[i]])
+    }
+  }
+
+  # Check for duplicate locations and average the score
+  data_full <- data_full %>%
+    group_by(geometry) %>%
+    summarize(score = mean(score, na.rm = TRUE), .groups = "drop")
+
+  # Create the base plot
+  out <- ggplot(data = data_full) +
+    geom_sf(aes(color = score), size = 2) +
+    ggtitle(paste("Visualizing", which_score, "for model", which_model)) +
+    theme_minimal()
+
+
+  return(out)
+}
+
+##' @title Plot the estimated MDA impact function
+##'
+##' @description This function generates a plot of the estimated mass drug administration (MDA) impact function
+##' based on a fitted decay-adjusted spatio-temporal (DAST) model.
+##'
+##' @param object A fitted DAST model object, obtained as an output from the function \code{\link{dast}}.
+##' @param n_sim Number of posterior samples to simulate (default: 10000).
+##' @param x_max Maximum value for the x-axis (default: 10 years).
+##' @param conf_level Confidence level for the uncertainty interval (default: 0.95).
+##' @param lower_f Optional lower bound for the y-axis.
+##' @param upper_f Optional upper bound for the y-axis.
+##' @param ... Additional arguments (currently unused).
+##'
+##' @return A ggplot2 object visualizing the MDA impact function, showing the median and confidence interval of the estimated function.
+##'
+##' @importFrom ggplot2 coord_cartesian geom_ribbon geom_line
+##' @export
+plot_mda <- function(object, n_sim = 10000, x_max = 10, conf_level = 0.95,
+                     lower_f = NULL, upper_f = NULL, ...) {
+
+  .data <- NULL
+  # Extract parameter estimates
+  par_hat <- coef(object)
+  n_par <- length(object$estimate)
+
+  if (is.null(par_hat$alpha)) {
+    ind_dast <- n_par
+    par_dast <- log(par_hat$gamma)
+  } else {
+    ind_dast <- (n_par-1):n_par
+    par_dast <- c(log(par_hat$alpha / (1 - par_hat$alpha)), log(par_hat$gamma))
+  }
+
+  # Generate parameter samples
+  Sigma_par <- as.matrix(object$covariance[ind_dast, ind_dast])
+  Sigma_par_sroot <- t(chol(Sigma_par))
+  par_hat_sim <- t(sapply(1:n_sim, function(i) par_dast + Sigma_par_sroot %*% rnorm(length(ind_dast))))
+  par_hat_sim <- as.matrix(par_hat_sim)
+
+  power_val <- object$power_val
+
+  # Define MDA impact function
+  f <- function(x, alpha, gamma, kappa) {
+    alpha * exp(-(x / gamma)^kappa)
+  }
+
+  # Generate x-axis values
+  x_vals <- seq(0, x_max, length.out = 100)
+
+  # Compute median and confidence intervals
+  f_vals <- apply(par_hat_sim, 1, function(params) {
+    if(!is.null(par_hat$alpha)) {
+      alpha <- exp(params[1]) / (1 + exp(params[1]))
+      gamma <- exp(params[2])
+    } else {
+      alpha <- object$fix_alpha
+      gamma <- exp(params[1])
+    }
+    sapply(x_vals, function(x) f(x, alpha, gamma, power_val))
+  })
+
+  median_f <- apply(f_vals, 1, median)
+  lower_q <- apply(f_vals, 1, function(x) quantile(x, probs = (1 - conf_level) / 2))
+  upper_q <- apply(f_vals, 1, function(x) quantile(x, probs = 1 - (1 - conf_level) / 2))
+
+  if(is.null(lower_f)) lower_f <- min(lower_q)
+  if(is.null(upper_f)) upper_f <- max(upper_q)
+
+  # Create a single data frame with ribbon bounds
+  plot_data <- data.frame(
+    x = x_vals,
+    median = median_f,
+    lower = lower_q,
+    upper = upper_q
+  )
+
+  # Plot with clean styling: no legend, single color for median line, grey ribbon
+  ggplot(plot_data, aes(x = .data$x)) +
+    geom_ribbon(aes(ymin = .data$lower, ymax = .data$upper), fill = "grey70", alpha = 0.3) +
+    geom_line(aes(y = median), color = "black", linewidth = 1) +
+    labs(x = "Years since MDA", y = "Prevalence Relative Reduction", title = "MDA Impact Function") +
+    coord_cartesian(ylim = c(lower_f, upper_f)) +
+    theme_minimal()
 }

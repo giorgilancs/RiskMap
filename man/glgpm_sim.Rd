@@ -10,12 +10,11 @@ glgpm_sim(
   formula = NULL,
   data = NULL,
   family = NULL,
-  distr_offset = NULL,
+  den = NULL,
   cov_offset = NULL,
   crs = NULL,
   convert_to_crs = NULL,
   scale_to_km = TRUE,
-  control_mcmc = NULL,
   sim_pars = list(beta = NULL, sigma2 = NULL, tau2 = NULL, phi = NULL, sigma2_me = NULL,
     sigma2_re = NULL),
   messages = TRUE
@@ -32,7 +31,8 @@ glgpm_sim(
 
 \item{family}{Distribution family for the response variable. Must be one of 'gaussian', 'binomial', or 'poisson'.}
 
-\item{distr_offset}{Offset for the distributional part of the GLGPM. Required for 'binomial' and 'poisson' families.}
+\item{den}{Required for 'binomial' to denote the denominator (i.e. number of trials) of the Binomial distribution.
+For the 'poisson' family, the argument is optional and is used a multiplicative term to express the mean counts.}
 
 \item{cov_offset}{Offset for the covariate part of the GLGPM.}
 
@@ -41,8 +41,6 @@ glgpm_sim(
 \item{convert_to_crs}{CRS code to convert spatial data if different from 'crs'.}
 
 \item{scale_to_km}{Logical; if TRUE, distances between locations are computed in kilometers; if FALSE, in meters.}
-
-\item{control_mcmc}{Control parameters for MCMC simulation if applicable.}
 
 \item{sim_pars}{List of simulation parameters including 'beta', 'sigma2', 'tau2', 'phi', 'sigma2_me', and 'sigma2_re'.}
 

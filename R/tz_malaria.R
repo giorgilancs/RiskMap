@@ -2,8 +2,7 @@
 ##'
 ##' @description This dataset contains information on malaria prevalence and associated variables from the 2015 Tanzania Demographic Health Surveys. The data includes geographical, demographic, environmental, and health-related variables.
 ##'
-##' @format A data frame with 387 rows and 20 columns, containing the following variables:
-##' \itemize{
+##' \describe{
 ##'   \item{cluster.number}{ Cluster number, identifying the survey cluster.}
 ##'   \item{Lat}{ Latitude of the survey cluster.}
 ##'   \item{Long}{ Longitude of the survey cluster.}
@@ -25,6 +24,7 @@
 ##'   \item{utm_x}{ UTM (Universal Transverse Mercator) x-coordinate of the survey cluster.}
 ##'   \item{utm_y}{ UTM (Universal Transverse Mercator) y-coordinate of the survey cluster.}
 ##' }
+##' @format A data frame with 387 rows and 20 columns, containing the following variables:
 ##' The CRS of the UTM coordinates is 32736.
 ##' @name tz_malaria
 ##' @docType data
