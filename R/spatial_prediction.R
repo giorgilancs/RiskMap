@@ -701,17 +701,33 @@ pred_target_shp <- function(object, shp, shp_target=mean,
                             include_covariates = TRUE,
                             include_nugget = FALSE,
                             include_cov_offset = FALSE,
+                            include_mda_effect=TRUE,
+                            time_pred = NULL,
+                            mda_grid = NULL,
                             include_re = FALSE,
                             f_target = NULL,
-                            pd_summary = NULL) {
+                            pd_summary = NULL,
+                            messages = TRUE) {
   if(!inherits(object,
                what = "RiskMap.pred.re", which = FALSE)) {
     stop("The object passed to 'object' must be an output of
          the function 'pred_S'")
   }
+
   if(object$type!="joint") {
     stop("To run predictions with a shape file, joint predictions must be used;
          rerun 'pred_over_grid' and set type='joint'")
+  }
+
+  dast_model <- !is.null(object$par_hat$gamma)
+
+  if(dast_model) {
+    if(include_mda_effect & is.null(mda_grid)) {
+      stop("The MDA coverage must be specified for each point on the grid through the argument 'mda_grid'")
+    }
+    if(is.null(time_pred)) {
+      stop("For a DAST model, the time of prediction must be specified through the argument 'time_pred'")
+    }
   }
 
 
@@ -843,7 +859,7 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   }
   no_comp <- NULL
   for(h in 1:n_reg) {
-    message("Computing predictive target for:",shp[[col_names]][h])
+    if(messages) message("Computing predictive target for:",shp[[col_names]][h])
     if(length(inter[[h]])==0) {
       warning(paste("No points on the grid fall within", shp[[col_names]][h],
                     "and no predictions are carried out for this area"))
@@ -856,10 +872,23 @@ pred_target_shp <- function(object, shp, shp_target=mean,
         weights_h <- weights[ind_grid_h]
       }
       for(i in 1:n_f) {
+        target_grid_samples_i <- as.matrix(f_target[[i]](out$lp_samples[ind_grid_h,]))
+        if(dast_model && include_mda_effect) {
+          alpha <- object$par_hat$alpha
+          if(is.null(alpha)) alpha <- object$fix_alpha
+          gamma <- object$par_hat$gamma
+          mda_effect_time_pred <- compute_mda_effect(rep(time_pred, length(ind_grid_h)),
+                                                     mda_times = object$mda_times,
+                                                     mda_grid[ind_grid_h,], alpha = alpha,
+                                                     gamma = gamma, kappa = object$power_val)
+          target_grid_samples_i <- target_grid_samples_i*mda_effect_time_pred
+
+        }
 
         target_samples_i <-
-          apply(as.matrix(f_target[[i]](out$lp_samples[ind_grid_h,])),
+          apply(target_grid_samples_i,
                 2, function(x) shp_target(weights_h*x))
+
         out$target[[paste(names_reg[h])]][[paste(names_f[i])]] <- list()
         for(j in 1:n_summaries) {
           out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]] <-
@@ -867,7 +896,7 @@ pred_target_shp <- function(object, shp, shp_target=mean,
         }
       }
     }
-    message(" \n")
+    if(messages) message(" \n")
   }
 
   if(length(no_comp) > 0) {
@@ -893,6 +922,7 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   class(out) <- "RiskMap_pred_target_shp"
   return(out)
 }
+
 
 ##' Plot Method for RiskMap_pred_target_shp Objects
 ##'
