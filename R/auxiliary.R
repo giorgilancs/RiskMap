@@ -1162,6 +1162,7 @@ plot_score <- function(object, which_score, which_model, ...) {
 ##'
 ##' @param object A fitted DAST model object, obtained as an output from the function \code{\link{dast}}.
 ##' @param n_sim Number of posterior samples to simulate (default: 10000).
+##' @param x_min Minimum value for the x-axis (default: 1 year).
 ##' @param x_max Maximum value for the x-axis (default: 10 years).
 ##' @param conf_level Confidence level for the uncertainty interval (default: 0.95).
 ##' @param lower_f Optional lower bound for the y-axis.
@@ -1172,7 +1173,7 @@ plot_score <- function(object, which_score, which_model, ...) {
 ##'
 ##' @importFrom ggplot2 coord_cartesian geom_ribbon geom_line
 ##' @export
-plot_mda <- function(object, n_sim = 10000, x_max = 10, conf_level = 0.95,
+plot_mda <- function(object, n_sim = 10000, x_min = 1, x_max = 10, conf_level = 0.95,
                      lower_f = NULL, upper_f = NULL, ...) {
 
   .data <- NULL
@@ -1201,8 +1202,8 @@ plot_mda <- function(object, n_sim = 10000, x_max = 10, conf_level = 0.95,
     alpha * exp(-(x / gamma)^kappa)
   }
 
-  # Generate x-axis values
-  x_vals <- seq(0, x_max, length.out = 100)
+  # Generate x-axis values using x_min and x_max
+  x_vals <- seq(x_min, x_max, length.out = 100)
 
   # Compute median and confidence intervals
   f_vals <- apply(par_hat_sim, 1, function(params) {
@@ -1236,6 +1237,6 @@ plot_mda <- function(object, n_sim = 10000, x_max = 10, conf_level = 0.95,
     geom_ribbon(aes(ymin = .data$lower, ymax = .data$upper), fill = "grey70", alpha = 0.3) +
     geom_line(aes(y = median), color = "black", linewidth = 1) +
     labs(x = "Years since MDA", y = "Prevalence Relative Reduction", title = "MDA Impact Function") +
-    coord_cartesian(ylim = c(lower_f, upper_f)) +
+    coord_cartesian(xlim = c(x_min, x_max), ylim = c(lower_f, upper_f)) +
     theme_minimal()
 }
