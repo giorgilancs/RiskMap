@@ -554,6 +554,7 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
       if(is.null(object$fix_var_me)) {
         ind_sigma2_me <- p+3
         names(object$estimate)[ind_sigma2_me] <- "Measuremment error var."
+        object$estimate[ind_sigma2_me] <- exp(object$estimate[ind_sigma2_me])
       } else {
         ind_sigma2_me <- NULL
       }
@@ -583,7 +584,7 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
   }
   n_p <- length(object$estimate)
   object$estimate[-c(ind_beta,ind_alpha, ind_gamma)] <-
-      exp(object$estimate[-c(ind_beta,ind_alpha, ind_gamma)])
+    exp(object$estimate[-c(ind_beta,ind_alpha, ind_gamma)])
 
 
   if(n_re > 0) {
@@ -654,8 +655,8 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
     upper_gamma <- exp(object$estimate[ind_gamma]+qnorm(1-alpha/2)*se_par[ind_gamma])
 
     res$dast_par <- cbind(Estimate = c(est_alpha, est_gamma),
-                    'Lower limit' = c(lower_alpha, lower_gamma),
-                    'Upper limit' = c(upper_alpha, upper_gamma))
+                          'Lower limit' = c(lower_alpha, lower_gamma),
+                          'Upper limit' = c(upper_alpha, upper_gamma))
     res$power_val <- object$power_val
   }
 
