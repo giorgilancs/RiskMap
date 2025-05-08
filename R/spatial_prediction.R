@@ -674,6 +674,8 @@ plot.RiskMap_pred_target_grid <- function(x, which_target = "linear_target", whi
 ##' @param include_covariates Logical indicating whether to include covariates in predictions (default is TRUE).
 ##' @param include_nugget Logical indicating whether to include the nugget effect (default is FALSE).
 ##' @param include_cov_offset Logical indicating whether to include covariate offset in predictions (default is FALSE).
+##' @param include_mda_effect Logical indicating whether to include the mass drug administration (MDA) effect as defined by the fitted DAST model (default is TRUE).
+##' @param return_shp Logical indicating whether to return the shape file with the added predictive distribution summaries as defined through \code{pd_summary}.
 ##' @param include_re Logical indicating whether to include random effects in predictions (default is FALSE).
 ##' @param f_target List of target functions to apply to the linear predictor samples.
 ##' @param pd_summary List of summary functions (e.g., mean, sd) to summarize target samples.
@@ -702,6 +704,7 @@ pred_target_shp <- function(object, shp, shp_target=mean,
                             include_nugget = FALSE,
                             include_cov_offset = FALSE,
                             include_mda_effect=TRUE,
+                            return_shp=FALSE,
                             time_pred = NULL,
                             mda_grid = NULL,
                             include_re = FALSE,
@@ -899,19 +902,21 @@ pred_target_shp <- function(object, shp, shp_target=mean,
     if(messages) message(" \n")
   }
 
-  if(length(no_comp) > 0) {
-    ind_reg <- (1:n_reg)[-no_comp]
-  } else {
-    ind_reg <- 1:n_reg
-  }
-  for(i in 1:n_f) {
-    for(j in 1:n_summaries) {
-      name_ij <- paste(names_f[i],"_",paste(names_s[j]),sep="")
-      shp[[name_ij]] <- rep(NA, n_reg)
-      for(h in ind_reg) {
-        which_reg <- which(shp[[col_names]]==names_reg[h])
-        shp[which_reg,][[name_ij]] <-
-          out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]]
+  if(return_shp) {
+    if(length(no_comp) > 0) {
+      ind_reg <- (1:n_reg)[-no_comp]
+    } else {
+      ind_reg <- 1:n_reg
+    }
+    for(i in 1:n_f) {
+      for(j in 1:n_summaries) {
+        name_ij <- paste(names_f[i],"_",paste(names_s[j]),sep="")
+        shp[[name_ij]] <- rep(NA, n_reg)
+        for(h in ind_reg) {
+          which_reg <- which(shp[[col_names]]==names_reg[h])
+          shp[which_reg,][[name_ij]] <-
+            out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]]
+        }
       }
     }
   }
