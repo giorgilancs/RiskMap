@@ -443,6 +443,7 @@ coef.RiskMap <- function(object,...) {
     }
   }
 
+
   res <- list()
   res$beta <- object$estimate[ind_beta]
   res$sigma2 <- as.numeric(object$estimate[ind_sigma2])
@@ -473,6 +474,10 @@ coef.RiskMap <- function(object,...) {
     if(is.null(object$fix_alpha)) res$alpha <- as.numeric(1/(1+exp(-object$estimate[ind_alpha])))
     res$gamma <- as.numeric(exp(object$estimate[ind_gamma]))
   }
+  if(object$sst) {
+    ind_psi <- length(object$estimate)
+    res$psi <- as.numeric(exp(object$estimate[ind_psi]))
+  }
   return(res)
 }
 
@@ -500,8 +505,6 @@ coef.RiskMap <- function(object,...) {
 ##' @seealso \code{\link{glgpm}}, \code{\link{coef.RiskMap}}
 ##' @method summary RiskMap
 ##' @export
-
-
 summary.RiskMap <- function(object, ..., conf_level = 0.95) {
 
   n_re <- length(object$re)
@@ -519,6 +522,7 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
   ind_phi <- p+2
   names(object$estimate)[ind_phi] <- "Spatial corr. scale"
   dast_model <- !is.null(object$power_val)
+  sst <- object$sst
 
   if(is.null(object$fix_tau2)) {
     ind_tau2 <- p+3
@@ -593,6 +597,7 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
     }
   }
 
+
   J <- diag(1:n_p)
   if(length(ind_tau2)>0) J[ind_tau2,ind_sigma2] <- 1
 
@@ -660,7 +665,17 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
     res$power_val <- object$power_val
   }
 
+  if(sst) {
+    est_psi <- exp(object$estimate[ind_psi])
+    lower_psi <- exp(object$estimate[ind_psi]-qnorm(1-alpha/2)*se_par[ind_psi])
+    upper_psi <- exp(object$estimate[ind_psi]+qnorm(1-alpha/2)*se_par[ind_psi])
+    res$sp <- rbind(res$sp,
+                    c(est_psi, lower_psi, upper_psi))
+    rownames(res$sp)[3] <- paste("Temporal corr. scale")
+  }
+
   res$conf_level <- conf_level
+  res$sst <- sst
   res$family <- object$family
   res$dast <- dast_model
   res$kappa <- object$kappa
@@ -725,8 +740,14 @@ print.summary.RiskMap <- function(x, ...) {
     }
   }
 
-  cat("\n Spatial Guassian process \n")
-  cat("Matern covariance parameters (kappa=",x$kappa,") \n",sep="")
+  if(!sst) {
+    cat("\n Spatial Guassian process \n")
+    cat("Matern covariance parameters (kappa=",x$kappa,") \n",sep="")
+  } else {
+    cat("\n Spatio-temporal Guassian process \n")
+    cat("Separable spatio-temporal corelation function: \n")
+    cat("Spatial matern covariance parameters (kappa=",x$kappa,")  x Exponential time correlation function\n",sep="")
+  }
   printCoefmat(x$sp, Pvalues = FALSE)
   if(!is.null(x$tau2)) cat("Variance of the nugget effect fixed at",x$tau2,"\n")
 

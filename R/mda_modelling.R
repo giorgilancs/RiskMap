@@ -209,8 +209,9 @@ dast_initial_value <- function(y, D, units_m, int_mat, survey_times_data,
 ##' @export
 dast <- function(formula,
                  data,
-                 den = NULL, survey_times, mda_times, int_mat,
+                 den = NULL, mda_times, int_mat,
                  penalty = NULL,
+                 sst = FALSE,
                  drop = NULL, power_val,
                  crs = NULL, convert_to_crs = NULL,
                  scale_to_km = TRUE,
@@ -223,6 +224,7 @@ dast <- function(formula,
                                    sigma2 = NULL,
                                    tau2 = NULL,
                                    phi = NULL,
+                                   psi = NULL,
                                    sigma2_re = NULL,
                                    gamma = NULL,
                                    alpha = NULL)) {
@@ -238,6 +240,13 @@ dast <- function(formula,
   }
 
   inter_f <- interpret.formula(formula)
+
+  if(inter_f$gp.spec$dim != 3) {
+    stop("Three elements must be specified through 'gp' in the formula:
+         - the x-coordinates;
+         - the y-coordinates;
+         - the times of obeservation")
+  }
 
   if(length(crs)>0) {
     if(!is.numeric(crs) |
@@ -325,8 +334,7 @@ dast <- function(formula,
 
   }
 
-  do_name_st <- deparse(substitute(survey_times))
-  survey_times_data <- data[[do_name_st]]
+  survey_times_data <- data[[inter_f$gp.spec$term[3]]]
 
   if(length(inter_f$re.spec) > 0) {
     hr_re <- inter_f$re.spec$term
@@ -385,12 +393,25 @@ dast <- function(formula,
   if(messages) message("The CRS used is ", as.list(st_crs(data))$input, "\n")
 
   coords_o <- st_coordinates(data)
-  coords <- unique(coords_o)
+  if(sst) {
+    coords_time <- unique(cbind(coords_o, survey_times_data))
+    coords <- coords_time[,1:2]
+    time <- coords_time[,3]
+  } else {
+    coords <- unique(coords_o)
+  }
 
   m <- nrow(coords_o)
-  ID_coords <- sapply(1:m, function(i)
-    which(coords_o[i,1]==coords[,1] &
-            coords_o[i,2]==coords[,2]))
+  if(sst) {
+    ID_coords <- sapply(1:m, function(i)
+      which(coords_o[i,1]==coords[,1] &
+            coords_o[i,2]==coords[,2] &
+            survey_times_data[i]==time))
+  } else {
+    ID_coords <- sapply(1:m, function(i)
+      which(coords_o[i,1]==coords[,1] &
+              coords_o[i,2]==coords[,2]))
+  }
   s_unique <- unique(ID_coords)
 
   fix_tau2 <- inter_f$gp.spec$nugget
@@ -453,6 +474,13 @@ dast <- function(formula,
       if(start_pars$tau2<0) stop("the starting value for tau2 must be positive")
     }
   }
+  if(sst) {
+    if(is.null(start_pars$psi)) {
+      start_pars$psi <- quantile(dist(unique(survey_times_data)),0.1)
+    } else {
+      if(start_pars$psi<0) stop("the starting value for psi must be positive")
+    }
+  }
 
   if(n_re > 0) {
     if(is.null(start_pars$sigma2_re)) {
@@ -470,8 +498,9 @@ dast <- function(formula,
   if(is.null(par0)) {
     par0 <- start_pars
   }
-  res <- dast_fit(y = y, D, coords, units_m = units_m,
+  res <- dast_fit(y = y, D, coords, time, units_m = units_m,
                   mda_times = mda_times, survey_times_data = survey_times_data,
+                  sst = sst,
                   int_mat = int_mat,
                   kappa = inter_f$gp.spec$kappa,
                   penalty = penalty,
@@ -487,13 +516,17 @@ dast <- function(formula,
                                          start_pars$phi,
                                          start_pars$tau2,
                                          start_pars$sigma2_re),
+                      start_psi = start_pars$psi,
                       control_mcmc = control_mcmc,
                       messages = messages)
+
 
 
   res$y <- y
   res$D <- D
   res$coords <- coords
+  res$sst <- sst
+  if(sst) res$time <- time
   res$mda_times <- mda_times
   res$survey_times_data <- survey_times_data
   res$int_mat <- int_mat
@@ -530,8 +563,9 @@ dast <- function(formula,
 
 
 dast_fit <-
-  function(y, D, coords, units_m, kappa, penalty,
+  function(y, D, coords, time, units_m, kappa, penalty,
            mda_times, survey_times_data,
+           sst,
            int_mat,
            par0, cov_offset, power_val,
            ID_coords, ID_re, s_unique, re_unique,
@@ -539,6 +573,7 @@ dast_fit <-
            start_beta,
            start_alpha, start_gamma,
            start_cov_pars,
+           start_psi,
            control_mcmc,
            messages = TRUE) {
 
@@ -560,9 +595,18 @@ dast_fit <-
     n_samples <- (control_mcmc$n_sim-control_mcmc$burnin)/control_mcmc$thin
 
     u = dist(coords)
+    if(sst) v = dist(time)
 
-    Sigma0 <- sigma2_0*matern_cor(u = u, phi = phi0, kappa = kappa,
-                                  return_sym_matrix = TRUE)
+    if(sst) {
+      psi0 <- par0$psi
+      Sigma0 <- sigma2_0*matern_cor(u = u, phi = phi0, kappa = kappa,
+                                    return_sym_matrix = TRUE) *
+                         matern_cor(u = v, phi = psi0, kappa = 0.5,
+                                    return_sym_matrix = TRUE)
+    } else {
+      Sigma0 <- sigma2_0*matern_cor(u = u, phi = phi0, kappa = kappa,
+                                    return_sym_matrix = TRUE)
+    }
 
     diag(Sigma0) <- diag(Sigma0) + tau2_0
 
@@ -597,40 +641,51 @@ dast_fit <-
 
     S_tot_samples <- simulation$samples$S
 
+    # Get the number of columns in D
     p <- ncol(D)
 
+    # Define index for beta, sigma2, and phi
     ind_beta <- 1:p
+    ind_sigma2 <- p + 1
+    ind_phi <- p + 2
 
-    ind_sigma2 <- p+1
-
-    ind_phi <- p+2
-
-    if(!is.null(fix_tau2)) {
-      if(n_re>0) {
-        ind_sigma2_re <- (p+2+1):(p+2+n_re)
-        n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[,i])))
-      }
-      if(is.null(fix_alpha)) {
-        ind_alpha <- p+n_re+3
-        ind_gamma <- p+n_re+4
+    # Conditional indexing based on fix_tau2 and n_re
+    if (!is.null(fix_tau2)) {
+      if (n_re > 0) {
+        ind_sigma2_re <- (p + 2 + 1):(p + 2 + n_re)
+        n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[, i])))
       } else {
-        ind_gamma <- p+n_re+3
+        n_dim_re <- NULL
+        ind_re <- NULL
       }
 
+      if (is.null(fix_alpha)) {
+        ind_alpha <- p + n_re + 3
+        ind_gamma <- p + n_re + 4
+        ind_psi <- p + n_re + 5  # psi when alpha is not fixed
+      } else {
+        ind_gamma <- p + n_re + 3
+        ind_psi <- p + n_re + 4  # psi when alpha is fixed
+      }
     } else {
-      ind_nu2 <- p+3
-      if(n_re>0) {
-        ind_sigma2_re <- (p+3+1):(p+3+n_re)
-        n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[,i])))
-      }
-      if(is.null(fix_alpha)) {
-        ind_alpha <- p+n_re+4
-        ind_gamma <- p+n_re+5
+      ind_nu2 <- p + 3
+      if (n_re > 0) {
+        ind_sigma2_re <- (p + 3 + 1):(p + 3 + n_re)
+        n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[, i])))
       } else {
-        ind_gamma <- p+n_re+4
+        n_dim_re <- NULL
+        ind_re <- NULL
+      }
+
+      if (is.null(fix_alpha)) {
+        ind_alpha <- p + n_re + 4
+        ind_gamma <- p + n_re + 5
+        ind_psi <- p + n_re + 6  # psi when alpha is not fixed
+      } else {
+        ind_gamma <- p + n_re + 4
+        ind_psi <- p + n_re + 5  # psi when alpha is fixed
       }
     }
-
 
 
     if(n_re> 0) {
@@ -698,18 +753,26 @@ dast_fit <-
         nu2 <- exp(par[ind_nu2])
       }
       phi <- exp(par[ind_phi])
+
+      if(sst) psi <- exp(par[ind_psi])
+
       val <- list()
       val$sigma2 <- sigma2
       val$mu <- as.numeric(D%*%beta)+cov_offset
       val$mda_effect <- compute_mda_effect(survey_times_data, mda_times,
-                                       intervention = int_mat,
-                                       alpha, gamma, kappa = power_val)
+                                           intervention = int_mat,
+                                           alpha, gamma, kappa = power_val)
       val$pen_alpha <- penalty[[1]](alpha)
       if(n_re > 0) {
         val$sigma2_re <- exp(par[ind_sigma2_re])
       }
       if(is.na(ldetR) & is.na(as.numeric(R.inv)[1])) {
-        R <- matern_cor(u, phi = phi, kappa=kappa,return_sym_matrix = TRUE)
+        if(sst) {
+          R <- matern_cor(u, phi = phi, kappa=kappa,return_sym_matrix = TRUE)*
+               matern_cor(v, phi = psi, kappa=kappa,return_sym_matrix = TRUE)
+        } else {
+          R <- matern_cor(u, phi = phi, kappa=kappa,return_sym_matrix = TRUE)
+        }
         diag(R) <- diag(R)+nu2
         val$ldetR <- determinant(R)$modulus
         val$R.inv <- solve(R)
@@ -745,6 +808,7 @@ dast_fit <-
                       log(par0$gamma))
       }
     }
+    if(sst) par0_vec <- c(par0_vec, log(par0$psi))
 
     log.f.tilde <- compute.log.f(par0_vec)
 
@@ -753,126 +817,11 @@ dast_fit <-
     }
 
     grad.MC.log.lik <- function(par) {
-      beta <- par[ind_beta]; mu <- as.numeric(D%*%beta)+cov_offset
+      beta <- par[ind_beta]
+      mu <- as.numeric(D %*% beta) + cov_offset
       sigma2 <- exp(par[ind_sigma2])
-      if(is.null(fix_alpha)) {
-        alpha <- exp(par[ind_alpha])/(1+exp(par[ind_alpha]))
-      } else {
-        alpha <- fix_alpha
-      }
-      gamma <- exp(par[ind_gamma])
-      mda_effect_all <- compute_mda_effect_derivatives(survey_times_data, mda_times,
-                                       intervention = int_mat,
-                                       alpha, gamma, kappa = power_val)
-      mda_effect <- mda_effect_all$effect
-      mda_der_alpha <- mda_effect_all$d_alpha
-      mda_der_gamma <- mda_effect_all$d_gamma
-
-      if(length(fix_tau2)>0) {
-        nu2 <- fix_tau2/sigma2
-      } else {
-        nu2 <- exp(par[ind_nu2])
-      }
-      phi <- exp(par[ind_phi])
-      if(n_re > 0) {
-        sigma2_re <- exp(par[ind_sigma2_re])
-      }
-
-      R <- matern_cor(u, phi = phi, kappa=kappa,return_sym_matrix = TRUE)
-      diag(R) <- diag(R)+nu2
-
-      R.inv <- solve(R)
-      ldetR <- determinant(R)$modulus
-
-      exp.fact <- exp(compute.log.f(par,ldetR,R.inv)-log.f.tilde)
-      L.m <- sum(exp.fact)
-      exp.fact <- exp.fact/L.m
-
-      R1.phi <- matern.grad.phi(u,phi,kappa)
-      m1.phi <- R.inv%*%R1.phi
-      t1.phi <- -0.5*sum(diag(m1.phi))
-      m2.phi <- m1.phi%*%R.inv; rm(m1.phi)
-
-      if(is.null(fix_tau2)){
-        t1.nu2 <- -0.5*sum(diag(R.inv))
-        m2.nu2 <- R.inv%*%R.inv
-      }
-
-      gradient.S <- function(S_tot) {
-        S <- S_tot[1:n_loc]
-
-        if(n_re > 0) {
-          S_re_list <- list()
-          for(i in 1:n_re) {
-            S_re_list[[i]] <- S_tot[ind_re[[i]]]
-          }
-        }
-
-        eta <- mu + S[ID_coords]
-        if(n_re > 0) {
-          for(i in 1:n_re) {
-            eta <- eta + S_re_list[[i]][ID_re[,i]]
-          }
-        }
-
-
-        prob_star <- 1 / (1 + exp(-eta))
-        prob <- mda_effect * prob_star
-
-        # Compute derivative of log-likelihood with respect to eta
-        d_S <- (y/prob - (units_m-y)/(1-prob))*mda_effect*prob_star/(1+exp(eta))
-        d_S <- as.numeric(d_S)
-
-        q.f_S <- t(S)%*%R.inv%*%S
-
-        grad.beta <-  t(D)%*%d_S
-
-        grad.log.sigma2 <- (-n_loc/(2*sigma2)+0.5*q.f_S/(sigma2^2))*sigma2
-
-        grad.log.phi <- (t1.phi+0.5*as.numeric(t(S)%*%m2.phi%*%(S))/sigma2)*phi
-
-        if(is.null(fix_alpha)) {
-          der.alpha <- exp(par[ind_alpha])/((1+exp(par[ind_alpha]))^2)
-          grad.alpha.t <- der.alpha*(sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha) +
-                                     -penalty[[2]](alpha))
-        }
-
-        grad.log.gamma <- gamma*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_gamma)
-
-        out <- c(grad.beta,grad.log.sigma2,grad.log.phi)
-
-        if(is.null(fix_tau2)) {
-          grad.log.nu2 <-  (t1.nu2+0.5*as.numeric(t(S)%*%m2.nu2%*%(S))/sigma2)*nu2
-          out <- c(out,grad.log.nu2)
-        }
-
-        if(n_re > 0) {
-          grad.log.sigma2_re <- rep(NA, n_re)
-          for(i in 1:n_re) {
-            grad.log.sigma2_re[i] <- (-n_dim_re[i]/(2*sigma2_re[i])+0.5*sum(S_re_list[[i]]^2)/
-                                        (sigma2_re[i]^2))*sigma2_re[i]
-          }
-          out <- c(out,grad.log.sigma2_re)
-        }
-        if(is.null(fix_alpha)) {
-          out <- c(out,grad.alpha.t, grad.log.gamma)
-        } else {
-          out <- c(out, grad.log.gamma)
-        }
-        out
-      }
-      out <- rep(0,length(par))
-      for(i in 1:n_samples) {
-        out <- out + exp.fact[i]*gradient.S(S_tot_samples[i,])
-      }
-      out
-    }
-
-    hess.MC.log.lik <- function(par) {
-      beta <- par[ind_beta]; mu <- as.numeric(D%*%beta)+cov_offset
-      sigma2 <- exp(par[ind_sigma2])
-      if(is.null(fix_alpha)) {
-        alpha <- exp(par[ind_alpha])/(1+exp(par[ind_alpha]))
+      if (is.null(fix_alpha)) {
+        alpha <- exp(par[ind_alpha]) / (1 + exp(par[ind_alpha]))
       } else {
         alpha <- fix_alpha
       }
@@ -883,200 +832,389 @@ dast_fit <-
       mda_effect <- mda_effect_all$effect
       mda_der_alpha <- mda_effect_all$d_alpha
       mda_der_gamma <- mda_effect_all$d_gamma
-      mda_der2_alpha <- mda_effect_all$d2_alpha
-      mda_der2_gamma <- mda_effect_all$d2_gamma
-      mda_der2_alpha_gamma <- mda_effect_all$d2_alpha_gamma
 
-
-      if(!is.null(fix_tau2)) {
-        nu2 <- fix_tau2/sigma2
+      if (length(fix_tau2) > 0) {
+        nu2 <- fix_tau2 / sigma2
       } else {
         nu2 <- exp(par[ind_nu2])
       }
       phi <- exp(par[ind_phi])
-      if(n_re > 0) {
+
+      if(sst) psi <- exp(par[ind_psi])
+      if (n_re > 0) {
         sigma2_re <- exp(par[ind_sigma2_re])
       }
 
-      R <- matern_cor(u, phi = phi, kappa=kappa,return_sym_matrix = TRUE)
-      diag(R) <- diag(R)+nu2
-
+      if (sst) {
+        R_u <- matern_cor(u, phi = phi, kappa = kappa, return_sym_matrix = TRUE)
+        R_v <- matern_cor(v, phi = psi, kappa = 0.5, return_sym_matrix = TRUE)
+        R <- R_u * R_v
+      } else {
+        R <- matern_cor(u, phi = phi, kappa=kappa,return_sym_matrix = TRUE)
+      }
+      diag(R) <- diag(R) + nu2
       R.inv <- solve(R)
       ldetR <- determinant(R)$modulus
 
-      exp.fact <- exp(compute.log.f(par,ldetR,R.inv)-log.f.tilde)
-      L.m <- sum(exp.fact)
-      exp.fact <- exp.fact/L.m
-
-      R1.phi <- matern.grad.phi(u,phi,kappa)
-      m1.phi <- R.inv%*%R1.phi
-      t1.phi <- -0.5*sum(diag(m1.phi))
-      m2.phi <- m1.phi%*%R.inv; rm(m1.phi)
-
-      if(is.null(fix_tau2)){
-        t1.nu2 <- -0.5*sum(diag(R.inv))
-        m2.nu2 <- R.inv%*%R.inv
-        t2.nu2 <- 0.5*sum(diag(m2.nu2))
-        n2.nu2 <- 2*R.inv%*%m2.nu2
-        t2.nu2.phi <- 0.5*sum(diag(R.inv%*%R1.phi%*%R.inv))
-        n2.nu2.phi <- R.inv%*%(R.inv%*%R1.phi+
-                                 R1.phi%*%R.inv)%*%R.inv
+      if(sst) {
+        psi <- exp(par[ind_psi])
+        R1.psi <- R_u * matern.grad.phi(v, psi, 0.5)
+        m1.psi <- R.inv %*% R1.psi
+        t1.psi <- -0.5 * sum(diag(m1.psi))
+        m2.psi <- m1.psi %*% R.inv
       }
 
-      R2.phi <- matern.hessian.phi(u,phi,kappa)
-      t2.phi <- -0.5*sum(diag(R.inv%*%R2.phi-R.inv%*%R1.phi%*%R.inv%*%R1.phi))
-      n2.phi <- R.inv%*%(2*R1.phi%*%R.inv%*%R1.phi-R2.phi)%*%R.inv
+      exp.fact <- exp(compute.log.f(par, ldetR, R.inv) - log.f.tilde)
+      L.m <- sum(exp.fact)
+      exp.fact <- exp.fact / L.m
 
-      H <- matrix(0,nrow=length(par),ncol=length(par))
+      if (sst) {
+        R1.phi <- matern.grad.phi(u, phi, kappa) * R_v
+      } else {
+        R1.phi <- matern.grad.phi(u, phi, kappa)
+      }
+      m1.phi <- R.inv %*% R1.phi
+      t1.phi <- -0.5 * sum(diag(m1.phi))
+      m2.phi <- m1.phi %*% R.inv
 
-      hessian.S <- function(S_tot,ef) {
+      if (is.null(fix_tau2)) {
+        t1.nu2 <- -0.5 * sum(diag(R.inv))
+        m2.nu2 <- R.inv %*% R.inv
+      }
+
+      gradient.S <- function(S_tot) {
         S <- S_tot[1:n_loc]
-
-        if(n_re > 0) {
+        if (n_re > 0) {
           S_re_list <- list()
-          for(i in 1:n_re) {
+          for (i in 1:n_re) {
             S_re_list[[i]] <- S_tot[ind_re[[i]]]
           }
         }
 
         eta <- mu + S[ID_coords]
-        if(n_re > 0) {
-          for(i in 1:n_re) {
-            eta <- eta + S_re_list[[i]][ID_re[,i]]
+        if (n_re > 0) {
+          for (i in 1:n_re) {
+            eta <- eta + S_re_list[[i]][ID_re[, i]]
           }
         }
 
         prob_star <- 1 / (1 + exp(-eta))
         prob <- mda_effect * prob_star
-
-        # Compute derivative of log-likelihood with respect to eta
-        d_S <- (y/prob - (units_m-y)/(1-prob))*mda_effect*prob_star/(1+exp(eta))
+        d_S <- (y / prob - (units_m - y) / (1 - prob)) * mda_effect * prob_star / (1 + exp(eta))
         d_S <- as.numeric(d_S)
-        d2_S <- (-y/(prob^2)-(units_m-y)/((1-prob)^2))*((mda_effect*prob_star/(1+exp(eta)))^2)+
-                (y/prob - (units_m-y)/(1-prob))*mda_effect*exp(eta)*(1-exp(eta))/((1+exp(eta))^3)
 
-        if(is.null(fix_alpha)) {
-          d_S_alpha <- (-y/(prob^2)-(units_m-y)/((1-prob)^2))*mda_der_alpha*prob_star*
-            mda_effect*prob_star/(1+exp(eta))+
-            (y/prob - (units_m-y)/(1-prob))*mda_der_alpha*prob_star/(1+exp(eta))
+        q.f_S <- t(S) %*% R.inv %*% S
+        grad.beta <- t(D) %*% d_S
+        grad.log.sigma2 <- (-n_loc / (2 * sigma2) + 0.5 * q.f_S / (sigma2^2)) * sigma2
+        grad.log.phi <- (t1.phi + 0.5 * as.numeric(t(S) %*% m2.phi %*% S) / sigma2) * phi
 
-        }
-        d_S_gamma <- (-y/(prob^2)-(units_m-y)/((1-prob)^2))*mda_der_gamma*prob_star*
-          mda_effect*prob_star/(1+exp(eta))+
-          (y/prob - (units_m-y)/(1-prob))*mda_der_gamma*prob_star/(1+exp(eta))
-
-
-        q.f_S <- t(S)%*%R.inv%*%S
-
-        grad.beta <-  t(D)%*%d_S
-
-        grad.log.sigma2 <- (-n_loc/(2*sigma2)+0.5*q.f_S/(sigma2^2))*sigma2
-
-        grad.log.phi <- (t1.phi+0.5*as.numeric(t(S)%*%m2.phi%*%(S))/sigma2)*phi
-
-        if(is.null(fix_alpha)) {
-          der.alpha <- exp(par[ind_alpha])/((1+exp(par[ind_alpha]))^2)
-          grad.alpha.t <- der.alpha*(sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha)+
-                                     -penalty[[2]](alpha))
-        }
-        grad.log.gamma <- gamma*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_gamma)
-
-        g <- c(grad.beta,grad.log.sigma2,grad.log.phi)
-        if(is.null(fix_tau2)) {
-          grad.log.nu2 <-  (t1.nu2+0.5*as.numeric(t(S)%*%m2.nu2%*%(S))/sigma2)*nu2
-          g <- c(g,grad.log.nu2)
-        }
-        if(is.null(fix_alpha)) {
-          g <- c(g,grad.alpha.t, grad.log.gamma)
-        } else {
-          g <- c(g, grad.log.gamma)
+        if (is.null(fix_alpha)) {
+          der.alpha <- exp(par[ind_alpha]) / ((1 + exp(par[ind_alpha]))^2)
+          grad.alpha.t <- der.alpha * (
+            sum((y / mda_effect - (units_m - y) * prob_star / (1 - prob)) * mda_der_alpha) -
+              penalty[[2]](alpha)
+          )
         }
 
+        grad.log.gamma <- gamma * sum((y / mda_effect - (units_m - y) * prob_star / (1 - prob)) * mda_der_gamma)
 
-        if(n_re > 0) {
+        out <- c(grad.beta, grad.log.sigma2, grad.log.phi)
+
+        if (is.null(fix_tau2)) {
+          grad.log.nu2 <- (t1.nu2 + 0.5 * as.numeric(t(S) %*% m2.nu2 %*% S) / sigma2) * nu2
+          out <- c(out, grad.log.nu2)
+        }
+
+        if (n_re > 0) {
           grad.log.sigma2_re <- rep(NA, n_re)
-          for(i in 1:n_re) {
-            grad.log.sigma2_re[i] <- (-n_dim_re[i]/(2*sigma2_re[i])+0.5*sum(S_re_list[[i]]^2)/
-                                        (sigma2_re[i]^2))*sigma2_re[i]
+          for (i in 1:n_re) {
+            grad.log.sigma2_re[i] <- (-n_dim_re[i] / (2 * sigma2_re[i]) +
+                                        0.5 * sum(S_re_list[[i]]^2) / (sigma2_re[i]^2)) * sigma2_re[i]
           }
-          g <- c(g,grad.log.sigma2_re)
+          out <- c(out, grad.log.sigma2_re)
         }
 
-        grad2.log.lsigma2.lsigma2 <- (n_loc/(2*sigma2^2)-q.f_S/(sigma2^3))*sigma2^2+
-          grad.log.sigma2
-
-        grad2.log.lphi.lphi <-(t2.phi-0.5*t(S)%*%n2.phi%*%(S)/sigma2)*phi^2+
-          grad.log.phi
-
-        H[ind_beta, ind_beta] <- t(D)%*%(D*d2_S)
-
-        if(is.null(fix_alpha)) {
-          H[ind_beta, ind_alpha] <-
-          H[ind_alpha, ind_beta] <- t(D)%*%d_S_alpha*der.alpha
-
-          der2.alpha <- exp(par[ind_alpha])*(1-exp(par[ind_alpha]))/((1+exp(par[ind_alpha]))^3)
-          H[ind_alpha, ind_alpha] <- der2.alpha*(sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_alpha)-penalty[[2]](alpha))+
-            (der.alpha^2)*(sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der2_alpha+
-                                (-y/mda_effect^2-(units_m-y)*(prob_star^2)/(1-prob)^2)*mda_der_alpha^2)+
-                                -penalty[[3]](alpha))
-
-          H[ind_alpha, ind_gamma] <-
-            H[ind_gamma, ind_alpha] <-
-            (gamma*der.alpha)*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der2_alpha_gamma+
-                                    (-y/mda_effect^2-(units_m-y)*(prob_star^2)/(1-prob)^2)*mda_der_alpha*mda_der_gamma)
-
+        if (is.null(fix_alpha)) {
+          out <- c(out, grad.alpha.t, grad.log.gamma)
+        } else {
+          out <- c(out, grad.log.gamma)
         }
 
-
-        H[ind_beta, ind_gamma] <-
-        H[ind_gamma, ind_beta] <- t(D)%*%d_S_gamma*gamma
-
-
-        H[ind_gamma, ind_gamma] <- gamma*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der_gamma)+
-          (gamma^2)*sum((y/mda_effect-(units_m-y)*prob_star/(1-prob))*mda_der2_gamma+
-                          (-y/mda_effect^2-(units_m-y)*(prob_star^2)/(1-prob)^2)*mda_der_gamma^2)
-
-        H[ind_sigma2, ind_sigma2] <-  grad2.log.lsigma2.lsigma2
-        H[ind_sigma2,ind_phi] <-
-          H[ind_phi, ind_sigma2] <- (grad.log.phi/phi-t1.phi)*(-phi)
-        H[ind_phi,ind_phi] <- grad2.log.lphi.lphi
-
-        if(is.null(fix_tau2)) {
-          grad2.log.lnu2.lnu2 <- (t2.nu2-0.5*t(S)%*%n2.nu2%*%(S)/sigma2)*nu2^2+
-            grad.log.nu2
-          grad2.log.lnu2.lphi <- (t2.nu2.phi-0.5*t(S)%*%n2.nu2.phi%*%(S)/sigma2)*phi*nu2
-          H[ind_sigma2,ind_nu2] <- H[ind_nu2,ind_sigma2] <- (grad.log.nu2/nu2-t1.nu2)*(-nu2)
-          H[ind_nu2,ind_nu2] <- grad2.log.lnu2.lnu2
-          H[ind_phi,ind_nu2] <- H[ind_nu2,ind_phi] <- grad2.log.lnu2.lphi
+        if (sst) {
+          grad.log.psi <- (t1.psi + 0.5 * as.numeric(t(S) %*% m2.psi %*% S) / sigma2) * psi
+          out <- c(out, grad.log.psi)
         }
 
-        if(n_re > 0) {
-          grad2.log.sigma2_re <- rep(NA, n_re)
-          for(i in 1:n_re) {
-            grad2.log.sigma2_re[i] <- (n_dim_re[i]/(2*sigma2_re[i]^2)-
-                                         sum(S_re_list[[i]]^2)/(sigma2_re[i]^3))*
-              sigma2_re[i]^2+grad.log.sigma2_re[i]
-            H[ind_sigma2_re[i],ind_sigma2_re[i]] <- grad2.log.sigma2_re[i]
-
-          }
-        }
-        out <- list()
-        out$mat1<- ef*(g%*%t(g)+H)
-        out$g <- g*ef
-        out
+        return(out)
       }
 
-      a <- rep(0,length(par))
-      A <- matrix(0,length(par),length(par))
-      for(i in 1:n_samples) {
-        out.i <- hessian.S(S_tot_samples[i,],exp.fact[i])
-        a <- a+out.i$g
-        A <- A+out.i$mat1
+      out <- rep(0, length(par))
+      for (i in 1:n_samples) {
+        out <- out + exp.fact[i] * gradient.S(S_tot_samples[i, ])
       }
-      (A-a%*%t(a))
-
+      out
     }
 
+    hess.MC.log.lik <- function(par) {
+      # Unpack parameters
+      beta   <- par[ind_beta]
+      mu     <- as.numeric(D %*% beta) + cov_offset
+      sigma2 <- exp(par[ind_sigma2])
+      if (is.null(fix_alpha)) {
+        alpha <- exp(par[ind_alpha]) / (1 + exp(par[ind_alpha]))
+      } else {
+        alpha <- fix_alpha
+      }
+      gamma <- exp(par[ind_gamma])
+
+      # MDA effect + derivatives
+      mda_all           <- compute_mda_effect_derivatives(
+        survey_times_data, mda_times,
+        intervention = int_mat,
+        alpha, gamma, kappa = power_val
+      )
+      mda_eff        <- mda_all$effect
+      mda_der_alpha  <- mda_all$d_alpha
+      mda_der_gamma  <- mda_all$d_gamma
+      mda_der2_alpha <- mda_all$d2_alpha
+      mda_der2_gamma <- mda_all$d2_gamma
+      mda_der2_alpha_gamma <- mda_all$d2_alpha_gamma
+
+      # nu2
+      if (!is.null(fix_tau2)) {
+        nu2 <- fix_tau2 / sigma2
+      } else {
+        nu2 <- exp(par[ind_nu2])
+      }
+
+      # Build R and its derivatives
+      phi <- exp(par[ind_phi])
+      if (sst) {
+        psi    <- exp(par[ind_psi])
+        R_u    <- matern_cor(u,   phi = phi, kappa = kappa, return_sym_matrix = TRUE)
+        R_v    <- matern_cor(v,   phi = psi, kappa = 0.5,    return_sym_matrix = TRUE)
+        R      <- R_u * R_v
+        R1.phi <- matern.grad.phi(u, phi, kappa) * R_v
+        R2.phi <- matern.hessian.phi(u, phi, kappa) * R_v
+        R1.psi <- R_u * matern.grad.phi(v, psi, 0.5)
+        R2.psi <- R_u * matern.hessian.phi(v, psi, 0.5)
+      } else {
+        R      <- matern_cor(u, phi = phi, kappa = kappa, return_sym_matrix = TRUE)
+        R1.phi <- matern.grad.phi(u, phi, kappa)
+        R2.phi <- matern.hessian.phi(u, phi, kappa)
+      }
+      diag(R) <- diag(R) + nu2
+      R.inv   <- solve(R)
+
+      # Precompute phi derivatives
+      m1.phi <- R.inv %*% R1.phi
+      t1.phi <- -0.5 * sum(diag(m1.phi))
+      m2.phi <- m1.phi %*% R.inv
+      t2.phi <- -0.5 * sum(diag(R.inv %*% R2.phi - R.inv %*% R1.phi %*% R.inv %*% R1.phi))
+      n2.phi <- R.inv %*% (2 * R1.phi %*% R.inv %*% R1.phi - R2.phi) %*% R.inv
+
+      if (sst) {
+        R2.psi.phi <- matern.grad.phi(u, phi, 0.5)*matern.grad.phi(v, psi, 0.5)
+        m1.psi   <- R.inv %*% R1.psi
+        t1.psi   <- -0.5 * sum(diag(m1.psi))
+        m2.psi   <- m1.psi %*% R.inv
+        t2.psi   <- -0.5 * sum(diag(R.inv %*% R2.psi - R.inv %*% R1.psi %*% R.inv %*% R1.psi))
+        n2.psi   <- R.inv %*% (2 * R1.psi %*% R.inv %*% R1.psi - R2.psi) %*% R.inv
+
+        t2.psi.phi <- -0.5*(sum(R.inv*R2.psi.phi)-
+                              sum(m1.phi*t(m1.psi)))
+        n2.psi.phi <- R.inv%*%(R1.phi%*%m1.psi+
+                                 R1.psi%*%m1.phi-
+                                 R2.psi.phi)%*%R.inv
+
+      }
+
+      # Precompute nu2 derivatives
+      if (is.null(fix_tau2)) {
+        m2.nu2     <- R.inv %*% R.inv
+        t1.nu2     <- -0.5 * sum(diag(R.inv))
+        t2.nu2     <-  0.5 * sum(diag(m2.nu2))
+        n2.nu2     <-  2 * R.inv %*% m2.nu2
+        t2.nu2.phi <-  0.5 * sum(diag(R.inv %*% R1.phi %*% R.inv))
+        n2.nu2.phi <-  R.inv %*% (R.inv %*% R1.phi + R1.phi %*% R.inv) %*% R.inv
+        if (sst) {
+          t2.nu2.psi <-  0.5 * sum(diag(R.inv %*% R1.psi %*% R.inv))
+          n2.nu2.psi <-  R.inv %*% (R.inv %*% R1.psi + R1.psi %*% R.inv) %*% R.inv
+        }
+      }
+
+      # Monte Carlo weights
+      ldetR <- determinant(R)$modulus
+      expf  <- exp(compute.log.f(par, ldetR, R.inv) - log.f.tilde)
+      w     <- expf / sum(expf)
+
+      # Accumulators
+      H_acc <- matrix(0, nrow = length(par), ncol = length(par))
+      g_acc <- rep(0, length(par))
+
+      hessian.S <- function(S_tot, ef) {
+        S <- S_tot[1:n_loc]
+        if (n_re > 0) {
+          S_re_list <- lapply(seq_len(n_re), function(i) S_tot[ind_re[[i]]])
+        }
+
+        # Linear predictor
+        eta <- mu + S[ID_coords]
+        if (n_re > 0) for (i in seq_len(n_re)) eta <- eta + S_re_list[[i]][ID_re[, i]]
+        prob_star <- 1 / (1 + exp(-eta))
+        prob      <- mda_eff * prob_star
+
+        # Derivatives wrt S
+        d_S  <- (y/prob - (units_m-y)/(1-prob)) * mda_eff * prob_star / (1+exp(eta))
+        d2_S <- (-y/prob^2 - (units_m-y)/(1-prob)^2) * (mda_eff*prob_star/(1+exp(eta)))^2 +
+          (y/prob - (units_m-y)/(1-prob)) * mda_eff * exp(eta)*(1-exp(eta))/(1+exp(eta))^3
+        d_S  <- as.numeric(d_S)
+
+        # d_S_alpha
+        if (is.null(fix_alpha)) {
+          d_S_alpha <- (-y/prob^2 - (units_m-y)/(1-prob)^2) *
+            mda_der_alpha * prob_star * mda_eff * prob_star/(1+exp(eta)) +
+            (y/prob - (units_m-y)/(1-prob)) * mda_der_alpha * prob_star/(1+exp(eta))
+        }
+
+        # d_S_gamma
+        d_S_gamma <- (-y/prob^2 - (units_m-y)/(1-prob)^2) *
+          mda_der_gamma * prob_star * mda_eff * prob_star/(1+exp(eta)) +
+          (y/prob - (units_m-y)/(1-prob)) * mda_der_gamma * prob_star/(1+exp(eta))
+
+        qSS <- as.numeric(t(S) %*% R.inv %*% S)
+
+        # Gradient components
+        grad_beta  <- t(D) %*% d_S
+        grad_ls2   <- (-n_loc/(2*sigma2) + 0.5*qSS/sigma2^2) * sigma2
+        grad_lphi  <- (t1.phi + 0.5*as.numeric(t(S)%*%m2.phi%*%S)/sigma2) * phi
+
+        g_vec <- c(grad_beta, grad_ls2, grad_lphi)
+
+        if (is.null(fix_tau2)) {
+          grad_lnu2 <- (t1.nu2 + 0.5*as.numeric(t(S)%*%m2.nu2%*%S)/sigma2)*nu2
+          g_vec     <- c(g_vec, grad_lnu2)
+        }
+
+        if (is.null(fix_alpha)) {
+          der_alpha  <- exp(par[ind_alpha])/(1+exp(par[ind_alpha]))^2
+          grad_alpha <- der_alpha * (
+            sum((y/mda_eff - (units_m-y)*prob_star/(1-prob))*mda_der_alpha) -
+              penalty[[2]](alpha)
+          )
+          g_vec <- c(g_vec, grad_alpha)
+        }
+
+        grad_lgamma <- gamma * sum((y/mda_eff - (units_m-y)*prob_star/(1-prob))*mda_der_gamma)
+        g_vec       <- c(g_vec, grad_lgamma)
+
+        if (n_re > 0) {
+          grad_ls2re <- sapply(seq_len(n_re), function(i)
+            (-n_dim_re[i]/(2*sigma2_re[i]) + 0.5*sum(S_re_list[[i]]^2)/sigma2_re[i]^2)*sigma2_re[i]
+          )
+          g_vec <- c(g_vec, grad_ls2re)
+        }
+
+        if (sst) {
+          grad_lpsi <- (t1.psi + 0.5*as.numeric(t(S)%*%m2.psi%*%S)/sigma2)*psi
+          g_vec     <- c(g_vec, grad_lpsi)
+        }
+
+        # Build H_loc
+        H_loc <- matrix(0, nrow=length(par), ncol=length(par))
+
+        # beta-beta
+        H_loc[ind_beta, ind_beta] <- t(D) %*% (D * d2_S)
+
+        # beta-alpha
+        if (is.null(fix_alpha)) {
+          H_loc[ind_beta, ind_alpha] <- t(D) %*% d_S_alpha * der_alpha
+          H_loc[ind_alpha, ind_beta] <- H_loc[ind_beta, ind_alpha]
+        }
+
+        # beta-gamma
+        H_loc[ind_beta, ind_gamma] <- t(D) %*% d_S_gamma * gamma
+        H_loc[ind_gamma, ind_beta] <- H_loc[ind_beta, ind_gamma]
+
+        # alpha-alpha
+        if (is.null(fix_alpha)) {
+          der2_alpha <- exp(par[ind_alpha])*(1-exp(par[ind_alpha]))/(1+exp(par[ind_alpha]))^3
+          H_loc[ind_alpha, ind_alpha] <- der2_alpha * (
+            sum((y/mda_eff - (units_m-y)*prob_star/(1-prob))*mda_der_alpha) -
+              penalty[[2]](alpha)
+          ) + der_alpha^2 * (
+            sum((y/mda_eff - (units_m-y)*prob_star/(1-prob))*mda_der2_alpha +
+                  (-y/mda_eff^2 - (units_m-y)*(prob_star^2)/(1-prob)^2)*mda_der_alpha^2
+            ) - penalty[[3]](alpha)
+          )
+        }
+
+        # alpha-gamma
+        if (is.null(fix_alpha)) {
+          H_loc[ind_alpha, ind_gamma] <- (gamma*der_alpha)*sum(
+            (y/mda_eff - (units_m-y)*prob_star/(1-prob))*mda_der2_alpha_gamma +
+              (-y/mda_eff^2 - (units_m-y)*(prob_star^2)/(1-prob)^2)*mda_der_alpha*mda_der_gamma
+          )
+          H_loc[ind_gamma, ind_alpha] <- H_loc[ind_alpha, ind_gamma]
+        }
+
+        # gamma-gamma
+        H_loc[ind_gamma, ind_gamma] <- gamma*sum(
+          (y/mda_eff - (units_m-y)*prob_star/(1-prob))*mda_der_gamma
+        ) + gamma^2*sum(
+          (y/mda_eff - (units_m-y)*prob_star/(1-prob))*mda_der2_gamma +
+            (-y/mda_eff^2 - (units_m-y)*(prob_star^2)/(1-prob)^2)*mda_der_gamma^2
+        )
+
+        # sigma2-sigma2
+        H_loc[ind_sigma2, ind_sigma2] <-
+          (n_loc/(2*sigma2^2) - qSS/sigma2^3)*sigma2^2 + grad_ls2
+
+        # sigma2-phi
+        H_loc[ind_sigma2, ind_phi] <- (grad_lphi/phi - t1.phi)*(-phi)
+        H_loc[ind_phi, ind_sigma2] <- H_loc[ind_sigma2, ind_phi]
+
+        # phi-phi
+        H_loc[ind_phi, ind_phi] <- (t2.phi - 0.5*as.numeric(t(S)%*%n2.phi%*%S)/sigma2)*phi^2 + grad_lphi
+
+        # nu2-block
+        if (is.null(fix_tau2)) {
+          H_loc[ind_sigma2, ind_nu2] <- (grad_lnu2/nu2 - t1.nu2)*(-nu2)
+          H_loc[ind_nu2, ind_sigma2] <- H_loc[ind_sigma2, ind_nu2]
+          H_loc[ind_nu2, ind_nu2]   <- (t2.nu2 - 0.5*as.numeric(t(S)%*%n2.nu2%*%S)/sigma2)*nu2^2 + grad_lnu2
+          H_loc[ind_phi, ind_nu2]   <- (t2.nu2.phi - 0.5*as.numeric(t(S)%*%n2.nu2.phi%*%S)/sigma2)*phi*nu2
+          H_loc[ind_nu2, ind_phi]   <- H_loc[ind_phi, ind_nu2]
+        }
+
+        # psi-block
+        if (sst) {
+          H_loc[ind_psi, ind_psi]     <- (t2.psi - 0.5*as.numeric(t(S)%*%n2.psi%*%S)/sigma2)*psi^2 + grad_lpsi
+          H_loc[ind_sigma2, ind_psi]    <- (grad_lpsi/psi - t1.psi)*(-psi)
+          H_loc[ind_psi, ind_sigma2]    <- H_loc[ind_sigma2, ind_psi]
+          H_loc[ind_phi, ind_psi]       <- (t2.psi.phi-0.5*t(S)%*%n2.psi.phi%*%S/sigma2)*phi*psi
+          H_loc[ind_psi, ind_phi]       <- H_loc[ind_phi, ind_psi]
+          if (is.null(fix_tau2)) {
+            val <- (t2.nu2.psi - 0.5*as.numeric(t(S)%*%n2.nu2.psi%*%S)/sigma2)*nu2*psi
+            H_loc[ind_nu2, ind_psi] <- val
+            H_loc[ind_psi, ind_nu2] <- val
+          }
+        }
+
+        list(
+          mat1 = ef * (g_vec %*% t(g_vec) + H_loc),
+          g    = ef * g_vec
+        )
+      }
+
+      # Monte Carlo aggregation
+      for (i in seq_len(n_samples)) {
+        tmp   <- hessian.S(S_tot_samples[i, ], w[i])
+        g_acc <- g_acc + tmp$g
+        H_acc <- H_acc + tmp$mat1
+      }
+
+      H_acc - g_acc %*% t(g_acc)
+    }
 
     start_cov_pars[-(1:2)] <- start_cov_pars[-(1:2)]/start_cov_pars[1]
     if(is.null(fix_alpha)) {
@@ -1085,14 +1223,17 @@ dast_fit <-
     } else {
       start_par <- c(start_beta, log(start_cov_pars), log(start_gamma))
     }
+    if(sst) start_par <- c(start_par, log(start_psi))
 
 
     out <- list()
-    estim <- nlminb(start_par,
-                    function(x) -MC.log.lik(x),
-                    function(x) -grad.MC.log.lik(x),
-                    function(x) -hess.MC.log.lik(x),
-                    control=list(trace=1*messages))
+    estim <- nlminb(
+      start     = start_par,
+      objective = function(x)   -MC.log.lik(x),
+      gradient  = function(x)   -grad.MC.log.lik(x),
+      hessian   = function(x)   -hess.MC.log.lik(x),
+      control   = list(trace=1*messages)
+    )
 
     out$estimate <- estim$par
     out$grad.MLE <- grad.MC.log.lik(estim$par)
@@ -1321,57 +1462,58 @@ maxim.integrand.dast <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,
 
 Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coords, ID_re = NULL,
                                        sigma2_re = NULL, control_mcmc,
-                                       Sigma_pd=NULL, mean_pd=NULL, messages = TRUE) {
+                                       Sigma_pd = NULL, mean_pd = NULL, messages = TRUE) {
 
+  # Precompute values that will not change
   Sigma.inv <- solve(Sigma)
   n_loc <- nrow(Sigma)
   n <- length(y)
-  if((!is.null(ID_re) & is.null(sigma2_re)) | (is.null(ID_re) & !is.null(sigma2_re))) {
-    stop("To introduce unstructured random effects both `ID_re` and `sigma2_re`
-           must be provided.")
+
+  if ((!is.null(ID_re) & is.null(sigma2_re)) | (is.null(ID_re) & !is.null(sigma2_re))) {
+    stop("To introduce unstructured random effects both `ID_re` and `sigma2_re` must be provided.")
   }
+
   n_re <- length(sigma2_re)
-  if(n_re > 0) {
-    n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[,i])))
-    ind_re <- list()
+  n_tot <- if (n_re > 0) n_loc + sum(sapply(1:n_re, function(i) length(unique(ID_re[, i])))) else n_loc
+
+  # Precompute the matrices
+  C_S <- t(sapply(1:n_loc, function(i) ID_coords == i))
+
+  if (n_re > 0) {
+    ind_re <- vector("list", n_re)
     add_i <- 0
-    for(i in 1:n_re) {
-      ind_re[[i]] <- (add_i+n_loc+1):(add_i+n_loc+n_dim_re[i])
-      if(i < n_re) add_i <- sum(n_dim_re[1:i])
+    n_dim_re <- sapply(1:n_re, function(i) length(unique(ID_re[, i])))
+
+    for (i in 1:n_re) {
+      ind_re[[i]] <- (add_i + n_loc + 1):(add_i + n_loc + n_dim_re[i])
+      if (i < n_re) add_i <- sum(n_dim_re[1:i])
     }
-  }
-  n_tot <- n_loc
-  if(n_re > 0) n_tot <- n_tot + sum(n_dim_re)
 
-  C_S <- t(sapply(1:n_loc,function(i) ID_coords==i))
+    C_re <- vector("list", n_re)
+    C_S_re <- vector("list", n_re)
+    C_re_re <- vector("list", n_re)
 
-  if(n_re>0) {
-    C_re <- list()
-    C_S_re <- list()
-    C_re_re <- list()
-    for(j in 1:n_re){
-      C_S_re[[j]] <- array(FALSE,dim = c(n_loc, n_dim_re[j], n))
-      C_re[[j]] <- t(sapply(1:n_dim_re[j],function(i) ID_re[,j]==i))
-      for(l in 1:n_dim_re[j]) {
-        for(k in 1:n_loc) {
-          ind_kl <- which(ID_coords==k & ID_re[,j]==l)
-          if(length(ind_kl) > 0) {
-            C_S_re[[j]][k,l,ind_kl] <- TRUE
-          }
+    for (j in 1:n_re) {
+      C_S_re[[j]] <- array(FALSE, dim = c(n_loc, n_dim_re[j], n))
+      C_re[[j]] <- t(sapply(1:n_dim_re[j], function(i) ID_re[, j] == i))
+      for (l in 1:n_dim_re[j]) {
+        for (k in 1:n_loc) {
+          ind_kl <- which(ID_coords == k & ID_re[, j] == l)
+          if (length(ind_kl) > 0) C_S_re[[j]][k, l, ind_kl] <- TRUE
         }
       }
 
-      if(j < n_re) {
-        C_re_re[[j]] <- list()
+      if (j < n_re) {
+        C_re_re[[j]] <- vector("list", n_re - j)
         counter <- 0
-        for(w in (j+1):n_re) {
-          counter <- counter+1
-          C_re_re[[j]][[counter]] <- array(FALSE,dim = c(n_dim_re[j], n_dim_re[w], n))
-          for(l in 1:n_dim_re[j]) {
-            for(k in 1:n_dim_re[w]) {
-              ind_lk <- which(ID_re[,j]==l & ID_re[,w]==k)
-              if(length(ind_kl) > 0) {
-                C_re_re[[j]][[counter]][l,k,ind_lk] <- TRUE
+        for (w in (j + 1):n_re) {
+          counter <- counter + 1
+          C_re_re[[j]][[counter]] <- array(FALSE, dim = c(n_dim_re[j], n_dim_re[w], n))
+          for (l in 1:n_dim_re[j]) {
+            for (k in 1:n_dim_re[w]) {
+              ind_lk <- which(ID_re[, j] == l & ID_re[, w] == k)
+              if (length(ind_lk) > 0) {
+                C_re_re[[j]][[counter]][l, k, ind_lk] <- TRUE
               }
             }
           }
@@ -1380,184 +1522,157 @@ Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coo
     }
   }
 
-  if(is.null(Sigma_pd) | is.null(mean_pd)) {
-    out_maxim <-
-      maxim.integrand.dast(y = y, units_m = units_m, Sigma = Sigma, mu = mu,
-                           mda_effect = mda_effect,
-                           ID_coords = ID_coords, ID_re = ID_re,
-                           sigma2_re = sigma2_re,
-                           hessian = FALSE, gradient = TRUE)
+  if (is.null(Sigma_pd) | is.null(mean_pd)) {
+    out_maxim <- maxim.integrand.dast(y = y, units_m = units_m, Sigma = Sigma, mu = mu,
+                                      mda_effect = mda_effect, ID_coords = ID_coords,
+                                      ID_re = ID_re, sigma2_re = sigma2_re,
+                                      hessian = FALSE, gradient = TRUE)
 
-    if(is.null(Sigma_pd)) Sigma_pd <- out_maxim$Sigma.tilde
-    if(is.null(mean_pd)) mean_pd <- out_maxim$mode
+    if (is.null(Sigma_pd)) Sigma_pd <- out_maxim$Sigma.tilde
+    if (is.null(mean_pd)) mean_pd <- out_maxim$mode
   }
 
   n_sim <- control_mcmc$n_sim
-  n <- length(y)
+  burnin <- control_mcmc$burnin
+  thin <- control_mcmc$thin
+  h <- control_mcmc$h %||% 1.65 / (n_tot^(1 / 6))  # Default value if not provided
+  c1.h <- control_mcmc$c1.h
+  c2.h <- control_mcmc$c2.h
+
   Sigma_pd_sroot <- t(chol(Sigma_pd))
   A <- solve(Sigma_pd_sroot)
 
-  if(n_re == 0) {
-    Sigma_tot <- Sigma
-  } else {
+  # Construct total covariance matrix (Sigma_tot)
+  Sigma_tot <- if (n_re == 0) Sigma else {
     Sigma_tot <- matrix(0, n_tot, n_tot)
     Sigma_tot[1:n_loc, 1:n_loc] <- Sigma
-    for(i in 1:n_re) {
+    for (i in 1:n_re) {
       diag(Sigma_tot)[ind_re[[i]]] <- sigma2_re[i]
     }
+    Sigma_tot
   }
-  Sigma_w_inv <- solve(A%*%Sigma_tot%*%t(A))
-  mu_w <- -as.numeric(A%*%mean_pd)
+
+  Sigma_w_inv <- solve(A %*% Sigma_tot %*% t(A))
+  mu_w <- -as.numeric(A %*% mean_pd)
 
   cond.dens.W <- function(W, S_tot) {
     S <- S_tot[1:n_loc]
-
-    q.f_S <- as.numeric(t(S)%*%Sigma.inv%*%(S))
+    q.f_S <- as.numeric(t(S) %*% Sigma.inv %*% S)
 
     q.f_re <- 0
-    if(n_re > 0) {
-      S_re <- NULL
-      S_re_list <- list()
-      for(i in 1:n_re) {
-        S_re_list[[i]] <- S_tot[ind_re[[i]]]
-        q.f_re <- q.f_re + sum(S_re_list[[i]]^2)/sigma2_re[i]
+    if (n_re > 0) {
+      for (i in 1:n_re) {
+        q.f_re <- q.f_re + sum(S_tot[ind_re[[i]]] ^ 2) / sigma2_re[i]
       }
     }
 
     eta <- mu + S[ID_coords]
-    if(n_re > 0) {
-      for(i in 1:n_re) {
-        eta <- eta + S_re_list[[i]][ID_re[,i]]
-      }
-    }
-    prob_star <- 1/(1+exp(-eta))
-    prob <- mda_effect*prob_star
-
-    llik <- sum(y*log(prob)+(units_m-y)*log(1-prob))
-
-    diff_w <- W-mu_w
-
-    -0.5*as.numeric(t(diff_w)%*%Sigma_w_inv%*%diff_w)+
-      llik
-  }
-
-  lang.grad <- function(W, S_tot) {
-    S <- S_tot[1:n_loc]
-
-    if(n_re > 0) {
-      S_re_list <- list()
-      for(i in 1:n_re) {
-        S_re_list[[i]] <- S_tot[ind_re[[i]]]
-      }
-    }
-
-    eta <- mu + S[ID_coords]
-    if(n_re > 0) {
-      for(i in 1:n_re) {
-        eta <- eta + S_re_list[[i]][ID_re[,i]]
+    if (n_re > 0) {
+      for (i in 1:n_re) {
+        eta <- eta + S_tot[ind_re[[i]]][ID_re[, i]]
       }
     }
 
     prob_star <- 1 / (1 + exp(-eta))
     prob <- mda_effect * prob_star
 
-    # Compute derivative of log-likelihood with respect to eta
-    d_S <- (y/prob - (units_m-y)/(1-prob))*mda_effect*prob_star/(1+exp(eta))
-    d_S <- as.numeric(d_S)
+    llik <- sum(y * log(prob) + (units_m - y) * log(1 - prob))
+    diff_w <- W - mu_w
 
-    grad_S_tot_r <- rep(NA,n_tot)
-    grad_S_tot_r[1:n_loc] <- as.numeric(sapply(1:n_loc,function(i) sum(d_S[C_S[i,]])))
-    if(n_re>0) {
-      for(j in 1:n_re) {
-        grad_S_tot_r[ind_re[[j]]] <- as.numeric(-S_re_list[[j]]/sigma2_re[[j]]+
-                                                  sapply(1:n_dim_re[[j]],
-                                                         function(x) sum(d_S[C_re[[j]][x,]])))
+    -0.5 * as.numeric(t(diff_w) %*% Sigma_w_inv %*% diff_w) + llik
+  }
+
+  lang.grad <- function(W, S_tot) {
+    S <- S_tot[1:n_loc]
+
+    eta <- mu + S[ID_coords]
+    if (n_re > 0) {
+      for (i in 1:n_re) {
+        eta <- eta + S_tot[ind_re[[i]]][ID_re[, i]]
       }
     }
 
-    out <- as.numeric(-Sigma_w_inv%*%(W-mu_w)+
-                        t(Sigma_pd_sroot)%*%grad_S_tot_r)
-    return(out)
+    prob_star <- 1 / (1 + exp(-eta))
+    prob <- mda_effect * prob_star
+
+    d_S <- (y / prob - (units_m - y) / (1 - prob)) * mda_effect * prob_star / (1 + exp(eta))
+    grad_S_tot_r <- rep(NA, n_tot)
+    grad_S_tot_r[1:n_loc] <- as.numeric(sapply(1:n_loc, function(i) sum(d_S[C_S[i,]])))
+    if (n_re > 0) {
+      for (j in 1:n_re) {
+        grad_S_tot_r[ind_re[[j]]] <- as.numeric(-S_tot[ind_re[[j]]] / sigma2_re[[j]] + sapply(1:n_dim_re[[j]], function(x) sum(d_S[C_re[[j]][x,]])))
+      }
+    }
+
+    -Sigma_w_inv %*% (W - mu_w) + t(Sigma_pd_sroot) %*% grad_S_tot_r
   }
 
-  h <- control_mcmc$h
-  if(is.null(h)) h <- 1.65/(n_tot^(1/6))
-  burnin <- control_mcmc$burnin
-  thin <- control_mcmc$thin
-  c1.h <- control_mcmc$c1.h
-  c2.h <- control_mcmc$c2.h
-  W_curr <- rep(0,n_tot)
-  S_tot_curr <- as.numeric(Sigma_pd_sroot%*%W_curr+mean_pd)
-  mean_curr <- as.numeric(W_curr + (h^2/2)*lang.grad(W_curr, S_tot_curr))
+  # MCMC loop
+  W_curr <- rep(0, n_tot)
+  S_tot_curr <- as.numeric(Sigma_pd_sroot %*% W_curr + mean_pd)
+  mean_curr <- as.numeric(W_curr + (h^2 / 2) * lang.grad(W_curr, S_tot_curr))
   lp_curr <- cond.dens.W(W_curr, S_tot_curr)
+
   acc <- 0
-  n_samples <- (n_sim-burnin)/thin
-  sim <- matrix(NA,nrow=n_samples, ncol=n_tot)
+  n_samples <- (n_sim - burnin) / thin
+  sim <- matrix(NA, nrow = n_samples, ncol = n_tot)
 
-  if(messages) message("\n - Conditional simulation (burnin=",
-                       control_mcmc$burnin,", thin=",control_mcmc$thin,"): \n ",sep="")
-  h.vec <- rep(NA,n_sim)
-  acc_prob <- rep(NA,n_sim)
+  if (messages) message("\n - Conditional simulation (burnin=", burnin, ", thin=", thin, "): \n", sep = "")
 
-  # Progress bar dimensions
-  progress_bar_length <- 50
+  h.vec <- rep(NA, n_sim)
+  acc_prob <- rep(NA, n_sim)
 
-  for(i in 1:n_sim) {
-    W_prop <- mean_curr+h*rnorm(n_tot)
-    S_tot_prop <-  as.numeric(Sigma_pd_sroot%*%W_prop+mean_pd)
-    mean_prop <- as.numeric(W_prop + (h^2/2)*lang.grad(W_prop, S_tot_prop))
+  # Parallel MCMC sampling
+  for (i in 1:n_sim) {
+    W_prop <- mean_curr + h * rnorm(n_tot)
+    S_tot_prop <- as.numeric(Sigma_pd_sroot %*% W_prop + mean_pd)
+    mean_prop <- as.numeric(W_prop + (h^2 / 2) * lang.grad(W_prop, S_tot_prop))
     lp_prop <- cond.dens.W(W_prop, S_tot_prop)
 
-    dprop_curr <- -sum((W_prop-mean_curr)^2)/(2*(h^2))
-    dprop_prop <- -sum((W_curr-mean_prop)^2)/(2*(h^2))
+    dprop_curr <- -sum((W_prop - mean_curr)^2) / (2 * (h^2))
+    dprop_prop <- -sum((W_curr - mean_prop)^2) / (2 * (h^2))
 
-    log_prob <- lp_prop+dprop_prop-lp_curr-dprop_curr
+    log_prob <- lp_prop + dprop_prop - lp_curr - dprop_curr
 
-    if(log(runif(1)) < log_prob) {
-      acc <- acc+1
+    if (log(runif(1)) < log_prob) {
+      acc <- acc + 1
       W_curr <- W_prop
       S_tot_curr <- S_tot_prop
       lp_curr <- lp_prop
       mean_curr <- mean_prop
     }
 
-    if( i > burnin & (i-burnin)%%thin==0) {
-      cnt <- (i-burnin)/thin
-      sim[cnt,] <- S_tot_curr
+    if (i > burnin && (i - burnin) %% thin == 0) {
+      cnt <- (i - burnin) / thin
+      sim[cnt, ] <- S_tot_curr
     }
 
-    acc_prob[i] <- acc/i
-    h.vec[i] <- h <- max(10e-20,h + c1.h*i^(-c2.h)*(acc/i-0.57))
+    acc_prob[i] <- acc / i
+    h.vec[i] <- max(10e-20, h + c1.h * i^(-c2.h) * (acc / i - 0.57))
 
-    # Update the progress bar
-    progress <- i / n_sim * 100
-    bar_length <- floor(progress / 100 * progress_bar_length)
-
-    # Construct the progress message
-    progress_message <- sprintf("\rProgress: [%-50s] %.2f%%",
-                                paste(rep("=", bar_length), collapse = ""),
-                                progress)
-
-    # Use cat() to write to stderr (equivalent to message())
-    if(messages) cat(progress_message, file = stderr())
-
-    # Ensure output is flushed to console
-    if(messages) flush.console()
-
+    if (messages) {
+      progress <- i / n_sim * 100
+      bar_length <- floor(progress / 100 * 50)
+      progress_message <- sprintf("\rProgress: [%-50s] %.2f%%", paste(rep("=", bar_length), collapse = ""), progress)
+      cat(progress_message, file = stderr())
+      flush.console()
+    }
   }
 
   message("\n")
-  out_sim <- list()
-  out_sim$samples <- list()
-  out_sim$samples$S <- sim[,1:n_loc]
-  if(n_re > 0) {
+
+  out_sim <- list(samples = list(S = sim[, 1:n_loc]))
+  if (n_re > 0) {
     re_names <- colnames(ID_re)
-    for(i in 1:n_re) {
-      out_sim$samples[[re_names[i]]] <- sim[,ind_re[[i]]]
+    for (i in 1:n_re) {
+      out_sim$samples[[re_names[i]]] <- sim[, ind_re[[i]]]
     }
   }
+
   out_sim$tuning_par <- h.vec
   out_sim$acceptance_prob <- acc_prob
   class(out_sim) <- "mcmc.RiskMap"
+
   return(out_sim)
 }
+
