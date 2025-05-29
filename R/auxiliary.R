@@ -524,6 +524,9 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
   dast_model <- !is.null(object$power_val)
   sst <- object$sst
 
+  if(sst) {
+    ind_psi <- length(object$estimate)
+  }
   if(is.null(object$fix_tau2)) {
     ind_tau2 <- p+3
     names(object$estimate)[ind_tau2] <- "Variance of the nugget"
@@ -678,6 +681,7 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
   res$sst <- sst
   res$family <- object$family
   res$dast <- dast_model
+  res$sst <- object$sst
   res$kappa <- object$kappa
   res$log.lik <- object$log.lik
   res$cov_offset_used <- !is.null(object$cov_offset)
