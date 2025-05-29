@@ -744,7 +744,7 @@ print.summary.RiskMap <- function(x, ...) {
     }
   }
 
-  if(!sst) {
+  if(!x$sst) {
     cat("\n Spatial Guassian process \n")
     cat("Matern covariance parameters (kappa=",x$kappa,") \n",sep="")
   } else {
