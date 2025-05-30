@@ -369,6 +369,7 @@ glgpm <- function(formula,
   res$scale_to_km <- scale_to_km
   res$data_sf <- data
   res$kappa <- kappa
+  res$sst <- FALSE
   if(nong) res$units_m <- units_m
   res$cov_offset <- cov_offset
   res$call <- match.call()
