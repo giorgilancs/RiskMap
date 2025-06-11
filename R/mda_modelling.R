@@ -258,7 +258,7 @@ dast <- function(formula,
       warning("'crs' is set to 4326 (long/lat)")
       crs <- 4326
     }
-    if(length(inter_f$gp.spec$term)==2) {
+    if(length(inter_f$gp.spec$term)>1) {
       new_x <- paste(inter_f$gp.spec$term[1],"_sf",sep="")
       new_y <- paste(inter_f$gp.spec$term[2],"_sf",sep="")
       data[[new_x]] <-  data[[inter_f$gp.spec$term[1]]]
