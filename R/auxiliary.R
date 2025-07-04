@@ -386,10 +386,15 @@ coef.RiskMap <- function(object,...) {
     re_names <- names(object$re)
   }
 
-  p <- ncol(object$D)
+  p <- ncol(as.matrix(object$D))
   ind_beta <- 1:p
 
-  names(object$estimate)[ind_beta] <- colnames(object$D)
+  if(p==1) {
+    object$D <- as.matrix(object$D)
+    names(object$estimate)[ind_beta] <- "Intercept"
+  } else {
+    names(object$estimate)[ind_beta] <- colnames(object$D)
+  }
   ind_sigma2 <- p+1
   names(object$estimate)[ind_sigma2] <- "sigma2"
   ind_phi <- p+2
@@ -449,7 +454,7 @@ coef.RiskMap <- function(object,...) {
   res$sigma2 <- as.numeric(object$estimate[ind_sigma2])
   res$phi <- as.numeric(object$estimate[ind_phi])
   if(object$family=="gaussian") {
-    if(!is.null(ind_sigma2_me)) res$sigma2_me <- as.numeric(object$estimate[ind_sigma2_me])
+    if(!is.null(ind_sigma2_me)) res$sigma2_me <- as.numeric(exp(object$estimate[ind_sigma2_me]))
   }
   if(!is.null(ind_tau2)) res$tau2 <- object$estimate[ind_tau2]
   if(n_re>0) res$sigma2_re <- as.numeric(object$estimate[ind_sigma2_re])
@@ -998,136 +1003,160 @@ print.summary.RiskMap.spatial.cv <- function(x, ...) {
 }
 
 
-
-
-##' @title Plot AnPIT Results from Model Validation
+##' @title Plot Calibration Curves (AnPIT / PIT) from Spatial Cross-Validation
 ##'
-##' @description This function plots AnPIT results from a `RiskMap.spatial.cv` object obtained using the `assess_pp` function.
+##' @description
+##' Produce calibration plots from a \code{RiskMap.spatial.cv} object returned by
+##' \code{\link{assess_pp}}.
+##' * For Binomial or Poisson models the function visualises the
+##'   \emph{Aggregated normalised Probability Integral Transform} (AnPIT)
+##'   curves stored in \code{$AnPIT}.
+##' * For Gaussian models it detects the list \code{$PIT} and instead plots
+##'   the empirical \emph{Probability Integral Transform} curve
+##'   (ECDF of PIT values) on the same \eqn{u}-grid.
 ##'
-##' @param object A `RiskMap.spatial.cv` object containing validation results.
-##' @param mode Character string specifying the mode of plotting: `"average"` (average AnPIT across test sets),
-##' `"single"` (AnPIT for a specific test set), or `"all"` (all test sets).
-##' @param test_set Integer specifying the test set to plot when `mode = "single"`.
-##' @param model_name Character string specifying the name of the model to plot. If `NULL`, all models are plotted.
-##' @param combine_panels Logical specifying whether to combine all models into a single plot when `mode = "average"`. Defaults to `FALSE`.
+##' A 45° dashed red line indicates perfect calibration.
 ##'
-##' @return A ggplot2 plot or a grid of plots.
+##' @param object       A \code{RiskMap.spatial.cv} object.
+##' @param mode         One of \code{"average"} (average curve across test sets),
+##'                     \code{"single"} (a specific test set),
+##'                     or \code{"all"} (every test set separately).
+##' @param test_set     Integer; required when \code{mode = "single"}.
+##' @param model_name   Optional character string; if supplied,
+##'                     only that model is plotted.
+##' @param combine_panels Logical; when \code{mode = "average"}, draw
+##'                       all models in a single panel (\code{TRUE})
+##'                       or one panel per model (\code{FALSE}, default).
+##'
+##' @return A \pkg{ggplot2} object (single plot) or a \pkg{ggpubr} grid.
+##'
 ##' @importFrom ggplot2 ggplot aes geom_line geom_abline labs theme_minimal guides guide_legend
-##' @importFrom ggpubr ggarrange
-##' @importFrom dplyr filter group_by summarize %>%
+##' @importFrom ggpubr  ggarrange
+##' @importFrom dplyr   filter group_by summarize %>%
+##' @importFrom stats    ecdf
 ##' @export
-plot_AnPIT <- function(object, mode = "average", test_set = NULL, model_name = NULL, combine_panels = FALSE) {
-  # Initailize global variables
-  model <- NULL
-  u_val <- NULL
-  AnPIT <- NULL
+plot_AnPIT <- function(object,
+                       mode = "average",
+                       test_set = NULL,
+                       model_name = NULL,
+                       combine_panels = FALSE) {
 
-  if (!inherits(object, "RiskMap.spatial.cv")) {
-    stop("`object` must be a 'Riskmap.spatial.cv' object obtained as an output from the function 'assess_pp'")
-  }
+  if (!inherits(object, "RiskMap.spatial.cv"))
+    stop("`object` must be a 'RiskMap.spatial.cv' produced by assess_pp().")
 
-  if (is.null(object$model[[1]]$AnPIT)) {
-    stop("The AnPIT was not computed when running the 'assess_pp' function")
-  }
+  all_models <- names(object$model)
 
-  # Ensure model_name matches an existing model
   if (!is.null(model_name)) {
-    if (!model_name %in% names(object$model)) {
-      stop(paste("Model name", model_name, "not found in the provided object."))
+    if (!model_name %in% all_models)
+      stop("Model name '", model_name, "' not found in `object$model`.")
+    all_models <- model_name
+  }
+
+  make_df <- function(mname) {
+    m <- object$model[[mname]]
+    if (!is.null(m$AnPIT)) {
+      lapply(seq_along(m$AnPIT), function(j) {
+        curve_vals <- m$AnPIT[[j]]
+        if (length(curve_vals) == 0) return(NULL)
+        data.frame(
+          u_val   = seq(0, 1, length.out = length(curve_vals)),
+          value   = curve_vals,
+          test_set = j,
+          model    = mname,
+          type     = "AnPIT"
+        )
+      })
+    } else if (!is.null(m$PIT)) {
+      u_grid <- seq(0, 1, length.out = 1000)
+      lapply(seq_along(m$PIT), function(j) {
+        pit_vec <- m$PIT[[j]]
+        if (length(pit_vec) == 0) return(NULL)
+        data.frame(
+          u_val   = u_grid,
+          value   = ecdf(pit_vec)(u_grid),
+          test_set = j,
+          model    = mname,
+          type     = "PIT"
+        )
+      })
+    } else {
+      NULL
     }
-    object <- list(model_name = object$model[[model_name]])
-    names(object) <- model_name
   }
 
-  # Create a data frame for plotting
-  plot_data <- do.call(rbind, lapply(seq_along(object)[-length(object)], function(i) {
-    AnPIT_list <- object$model[[i]]$AnPIT
-    model_name <- names(object$model)[i]
-    do.call(rbind, lapply(seq_along(AnPIT_list), function(j) {
-      test_set_data <- AnPIT_list[[j]]
-      if (length(test_set_data) == 0) return(NULL)
-      data.frame(
-        u_val = seq(0, 1, length.out = length(test_set_data)),
-        AnPIT = test_set_data,
-        test_set = j,
-        model = model_name
-      )
-    }))
-  }))
+  plot_data <- do.call(rbind, unlist(lapply(all_models, make_df), recursive = FALSE))
 
-  # Ensure plot_data is valid
-  if (is.null(plot_data) || nrow(plot_data) == 0) {
-    stop("No valid AnPIT data available for plotting.")
-  }
+  if (is.null(plot_data) || nrow(plot_data) == 0)
+    stop("No AnPIT or PIT data available for plotting.")
 
-  id_line <- geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "red")
+  y_label <- unique(plot_data$type)
+  if (length(y_label) > 1) y_label <- "Calibration curve"
+
+  id_line <- geom_abline(intercept = 0, slope = 1,
+                         linetype = "dashed", colour = "red")
 
   if (mode == "average" && combine_panels) {
-    # Combine all models into a single plot
-    avg_data <- plot_data %>%
-      group_by(model, u_val) %>%
-      summarize(AnPIT = mean(AnPIT, na.rm = TRUE), .groups = 'drop')
+    avg <- plot_data %>%
+      dplyr::group_by(model, u_val) %>%
+      dplyr::summarize(value = mean(value), .groups = "drop")
 
-    p <- ggplot(avg_data, aes(x = u_val, y = AnPIT, color = model)) +
-      geom_line() +
-      labs(title = "Average AnPIT Across Models", x = "", y = "AnPIT") +
-      theme_minimal() +
-      guides(color = guide_legend(title = "Model")) +
-      id_line
-    return(p)
-  }
-
-  # Handle other modes or non-combined "average"
-  plots <- list()
-  for (model_id in unique(plot_data$model)) {
-    model_data <- plot_data %>% filter(model == model_id)
-
-    if (mode == "average") {
-      avg_data <- model_data %>%
-        group_by(u_val) %>%
-        summarize(AnPIT = mean(AnPIT, na.rm = TRUE), .groups = 'drop')
-      p <- ggplot(avg_data, aes(x = u_val, y = AnPIT)) +
-        geom_line() +
-        labs(title = paste("Model", model_id, "- Average AnPIT"), x = "", y = "AnPIT") +
-        theme_minimal()
-
-    } else if (mode == "single") {
-      if (is.null(test_set)) {
-        stop("`test_set` must be provided when `mode` is 'single'")
-      }
-      model_data <- model_data %>% filter(test_set == !!test_set)
-
-      if (nrow(model_data) == 0) {
-        stop(paste("No data available for test_set:", test_set, "in model", model_id))
-      }
-
-      p <- ggplot(model_data, aes(x = u_val, y = AnPIT)) +
-        geom_line(color = "blue") +
-        labs(title = paste("Model", model_id, "- Test Set:", test_set), x = "", y = "AnPIT") +
-        theme_minimal()
-
-    } else if (mode == "all") {
-      p <- ggplot(model_data, aes(x = u_val, y = AnPIT, color = as.factor(test_set))) +
-        geom_line() +
-        labs(title = paste("Model", model_id, "- All Test Sets"), x = "", y = "AnPIT") +
+    return(
+      ggplot(avg, aes(u_val, value, colour = model)) +
+        geom_line() + id_line +
+        labs(title = "Average calibration curves",
+             x = "", y = y_label) +
         theme_minimal() +
-        guides(color = guide_legend(title = "Test Set"))
-
-    } else {
-      stop("Invalid `mode`. Use 'average', 'single', or 'all'.")
-    }
-
-    p <- p + id_line
-    plots[[model_id]] <- p
+        guides(colour = guide_legend(title = "Model"))
+    )
   }
 
-  n_plots <- length(plots)
-  ncol <- ifelse(n_plots == 1, 1, 2)
-  nrow <- ceiling(n_plots / ncol)
-  grid_plot <- ggpubr::ggarrange(plotlist = plots, ncol = ncol, nrow = nrow)
+  build_plot <- function(df, title_suffix = "") {
+    ggplot(df, aes(u_val, value,
+                   colour = if (mode == "all") as.factor(test_set) else NULL)) +
+      geom_line() + id_line +
+      labs(title = title_suffix, x = "", y = unique(df$type)) +
+      theme_minimal() +
+      guides(colour = guide_legend(title = "Test set"))
+  }
 
-  return(grid_plot)
+  plots <- list()
+  for (mname in all_models) {
+    df_model <- dplyr::filter(plot_data, model == mname)
+
+    p <- switch(mode,
+                average = {
+                  avg <- df_model %>%
+                    dplyr::group_by(u_val) %>%
+                    dplyr::summarize(value = mean(value), .groups = "drop")
+                  avg$type <- unique(df_model$type)
+                  build_plot(avg, paste("Model", mname, ": average"))
+                },
+                single  = {
+                  if (is.null(test_set))
+                    stop("Provide `test_set` when mode = 'single'.")
+                  df_ts <- dplyr::filter(df_model, test_set == test_set)
+                  if (nrow(df_ts) == 0)
+                    stop("No data for test_set ", test_set, " in model ", mname)
+                  build_plot(df_ts,
+                             paste("Model", mname, "- test set", test_set))
+                },
+                all     = build_plot(df_model,
+                                     paste("Model", mname, "- all test sets")),
+                stop("Invalid `mode`. Use 'average', 'single' or 'all'.")
+    )
+
+    plots[[mname]] <- p
+  }
+
+  if (length(plots) == 1) {
+    plots[[1]]
+  } else {
+    ncol <- ifelse(length(plots) == 2, 2, 2)
+    nrow <- ceiling(length(plots) / ncol)
+    ggpubr::ggarrange(plotlist = plots, ncol = ncol, nrow = nrow)
+  }
 }
+
 
 ##' @title Plot Spatial Scores for a Specific Model and Metric
 ##'
@@ -1156,7 +1185,7 @@ plot_score <- function(object, which_score, which_model, ...) {
   n_test <- length(test_sets)
 
   # Combine the data and add the score variable
-  data_full <- test_sets[[1]]
+  data_full <- st_as_sf(test_sets[[1]])
   data_full$score <- object$model[[which_model]]$score[[which_score]][[1]]
 
   if (n_test > 1) {
@@ -1168,8 +1197,12 @@ plot_score <- function(object, which_score, which_model, ...) {
 
   # Check for duplicate locations and average the score
   data_full <- data_full %>%
-    group_by(geometry) %>%
-    summarize(score = mean(score, na.rm = TRUE), .groups = "drop")
+    mutate(geom_id = st_as_text(geometry)) %>%
+    group_by(geom_id) %>%
+    summarize(score = mean(score, na.rm = TRUE),
+              geometry = first(geometry), .groups = "drop") %>%
+    st_as_sf()
+
 
   # Create the base plot
   out <- ggplot(data = data_full) +

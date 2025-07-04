@@ -62,6 +62,7 @@ pred_over_grid <- function(object,
   grp <- st_coordinates(grid_pred)
   n_pred <- nrow(grp)
   par_hat <- coef(object)
+  object$D <- as.matrix(object$D)
   p <- ncol(object$D)
 
   if(!all(length(object$cov_offset==0))) {
@@ -120,7 +121,7 @@ pred_over_grid <- function(object,
 
         comb_pred <- data.frame(predictors,
                                 re_predictors)
-        ind_c <- complete.cases(comb_pred)
+        ind_c <- complete.cases(as.data.frame(st_drop_geometry(comb_pred)))
         predictors_aux <- data.frame(na.omit(comb_pred)[,1:ncol(predictors)])
         colnames(predictors_aux) <- colnames(predictors)
         predictors <- predictors_aux
@@ -132,7 +133,7 @@ pred_over_grid <- function(object,
         re_predictors <- re_predictors_aux
       } else {
         comb_pred <- predictors
-        ind_c <- complete.cases(comb_pred)
+        ind_c <- complete.cases(as.data.frame(st_drop_geometry(comb_pred)))
         predictors_aux <- data.frame(na.omit(comb_pred))
         colnames(predictors_aux) <- colnames(predictors)
         predictors <- predictors_aux
@@ -1059,13 +1060,15 @@ update_predictors <- function(object,
   return(out)
 }
 
-##' @title Compute scoring rules using spatial cross-validation
+##' @title Assess Predictive Performance via Spatial Cross-Validation
 ##'
-##' @description This function calculates the predictive accuracy of a spatial model fitted to a `RiskMap` object using cross-validation.
-##' It allows model scoring based on specified metrics, with options for two cross-validation methods: spatial clustering and regularized subsampling.
-##' Users can choose between continuous ranked probability score (CRPS) and scaled CRPS (SCRPS) as scoring metrics to evaluate predictive quality.
-##' For each data fold, the function can either refit the model or use fixed parameters, enabling flexible model validation and evaluation.
-##' Additionally, it can generate plots of test sets across folds, providing visual insights into the spatial cross-validation structure.
+##' @description
+##' This function evaluates the predictive performance of spatial models fitted to `RiskMap` objects using cross-validation. It supports two classes of diagnostic tools:
+##'
+##' - **Scoring rules**, including the Continuous Ranked Probability Score (CRPS) and its scaled version (SCRPS), which quantify the sharpness and calibration of probabilistic forecasts;
+##' - **Calibration diagnostics**, based on the Probability Integral Transform (PIT) for Gaussian outcomes and Aggregated nonparametric PIT (AnPIT) curves for discrete outcomes (e.g., Poisson or Binomial).
+##'
+##' Cross-validation can be performed using either spatial clustering or regularized subsampling with a minimum inter-point distance. For each fold or subset, models can be refitted or evaluated with fixed parameters, offering flexibility in model validation. The function also provides visualizations of the spatial distribution of test folds.
 ##'
 ##' @param object A list of `RiskMap` objects, each representing a model fitted with `glgpm`.
 ##' @param keep_par_fixed Logical; if `TRUE`, parameters are kept fixed across folds, otherwise the model is re-estimated for each fold.
@@ -1080,18 +1083,26 @@ update_predictors <- function(object,
 ##' @param min_dist Optional; minimum distance for regularized subsampling (required if `method = "regularized"`).
 ##' @param plot_fold Logical; if `TRUE`, plots each fold's test set.
 ##' @param messages Logical; if `TRUE`, displays progress messages.
-##' @param which_metric Character; either `"CRPS"` or `"SCRPS"` to specify the scoring rule.
+##' @param which_metric Character vector; one or more of `"CRPS"`, `"SCRPS"`, or `"AnPIT"`, to specify the predictive performance metrics to compute.
 ##' @param ... Additional arguments passed to clustering or subsampling functions.
 ##'
 ##' @return A list of class `RiskMap.spatial.cv`, containing:
-##'   - `test_set`: A list containing all the test sets used for the validation in
-##'   'sf' class.
-##'   - `score`: A list with either `CRPS` or `SCRPS` scores for each fold, depending on `which_metric`.
-##'   - `refit`: A list of re-fitted models for each fold if `keep_par_fixed = FALSE`.
+##' \describe{
+##'   \item{test_set}{A list of test sets used for validation, each of class `'sf'`.}
+##'   \item{model}{A named list, one per model, each containing:
+##'     \describe{
+##'       \item{score}{A list with CRPS and/or SCRPS scores for each fold if requested.}
+##'       \item{PIT}{(if `family = "gaussian"` and `which_metric` includes `"AnPIT"`) A list of PIT values for test data.}
+##'       \item{AnPIT}{(if `family` is discrete and `which_metric` includes `"AnPIT"`) A list of AnPIT curves for test data.}
+##'     }
+##'   }
+##' }
 ##'
-##' @seealso \code{\link{spatial_clustering_cv}}, \code{\link{subsample.distance}}
+##' @seealso \code{\link{spatial_clustering_cv}}, \code{\link{subsample.distance}}, \code{\link{plot_AnPIT}}
 ##'
-##' @references Bolin, D., & Wallin, J. (2023). Local scale invariance and robustness of proper scoring rules. *Statistical Science*, 38(1), 140–159. \doi{10.1214/22-STS864}.
+##' @references
+##' Bolin, D., & Wallin, J. (2023). Local scale invariance and robustness of proper scoring rules. *Statistical Science*, 38(1), 140–159. \doi{10.1214/22-STS864}.
+##'
 ##' @importFrom terra match
 ##' @importFrom ggplot2 ggplot geom_sf theme_minimal ggtitle
 ##' @importFrom gridExtra grid.arrange
@@ -1102,324 +1113,327 @@ update_predictors <- function(object,
 ##' @export
 ##' @author Emanuele Giorgi
 assess_pp <- function(object,
-                        keep_par_fixed = TRUE,
-                        iter = 1,
-                        fold = NULL, n_size=NULL,
-                        control_sim = set_control_sim(),
-                        method, min_dist = NULL,
-                        plot_fold = TRUE,
-                        messages = TRUE,
-                        which_metric = c("AnPIT","CRPS", "SCRPS"),
-                        ...) {
+                      keep_par_fixed = TRUE,
+                      iter = 1,
+                      fold = NULL, n_size = NULL,
+                      control_sim = set_control_sim(),
+                      method, min_dist = NULL,
+                      plot_fold = TRUE,
+                      messages = TRUE,
+                      which_metric = c("AnPIT", "CRPS", "SCRPS"),
+                      ...) {
+
+  ## ───────────────────────────────────── helpers ────────────────────────────── ##
   is_list_of_riskmap <- function(object) {
-    # Check if the object is a list
-    if (!is.list(object)) {
-      return(FALSE)
-    }
-    # Check if all elements in the list are of class "RiskMap"
-    all(sapply(object, function(x) inherits(x, "RiskMap")))
+    is.list(object) &&
+      all(vapply(object, inherits, logical(1), what = "RiskMap"))
   }
 
-  if(!is_list_of_riskmap(object)) {
-    stop("The object passed to 'object' must be a list model fits, each obtained as
-         an output of the function 'glgpm'")
+  crps_gaussian <- function(y, mu, sigma) {
+    if (sigma == 0) return(0)
+    z   <- (y - mu) / sigma
+    2*dnorm(z) + z * (2 * pnorm(z) - 1) - 1 / sqrt(pi)
   }
 
-  if (!all(which_metric %in% c("CRPS", "SCRPS", "AnPIT"))) {
-    stop("'which_metric' must only contain 'CRPS', 'SCRPS' or 'AnPIT'")
+  ##  Discrete CRPS  (Binomial / Poisson)  ------------------------------------ ##
+  crps_discrete <- function(y, Fk) {
+    k      <- seq_along(Fk) - 1
+    sum((Fk - as.numeric(k >= y))^2)
   }
 
-  if(method != "cluster" & method != "regularized") {
-    stop("'method' must be either 'cluster' or 'regularized'")
+  ## expectation of CRPS under the predictive pmf  (needed for SCRPS) ---------- ##
+  exp_crps_discrete <- function(Fk, pk) {
+    k <- seq_along(pk) - 1
+    sum(pk * vapply(k, crps_discrete, numeric(1), Fk = Fk))
   }
 
-  if(method=="regularized") {
-    if(is.null(min_dist)) {
-      stop("if method='regularized' the minimum distance must be specified
-           through the argument 'min_dist'")
-    }
-    if(is.null(n_size)) {
-      stop("if method='regularized' the size of the test set must be defined through
-           the argument 'n_size'")
-    }
+  ## ───────────────────────────── sanity checks (unchanged) ─────────────────── ##
+  if (!is_list_of_riskmap(object))
+    stop("`object` must be a list of model fits obtained with `glgpm()`")
+
+  if (!all(which_metric %in% c("CRPS", "SCRPS", "AnPIT")))
+    stop("`which_metric` must only contain 'CRPS', 'SCRPS' or 'AnPIT'")
+
+  if (!method %in% c("cluster", "regularized"))
+    stop("`method` must be either 'cluster' or 'regularized'")
+
+  if (method == "regularized") {
+    if (is.null(min_dist))
+      stop("for 'regularized', supply `min_dist`")
+    if (is.null(n_size))
+      stop("for 'regularized', supply `n_size`")
   }
 
-  if(method=="cluster") {
-    if(is.null(fold)) {
-      stop("if method='cluster' the number of folds must be specified
-           through the argument 'fold'")
-    }
-  }
+  if (method == "cluster" && is.null(fold))
+    stop("for 'cluster', supply `fold`")
 
-  get_CRPS <- FALSE
-  get_SCRPS <- FALSE
-  get_AnPIT <- FALSE
+  if (!inherits(control_sim, "mcmc.RiskMap"))
+    stop("`control_sim` must come from `set_control_sim()`")
 
-  if(any(which_metric == "CRPS")) {
-    get_CRPS <- TRUE
-  }
+  get_CRPS  <- "CRPS"  %in% which_metric
+  get_SCRPS <- "SCRPS" %in% which_metric
+  get_AnPIT <- "AnPIT" %in% which_metric      # will hold PIT for Gaussian
 
-  if(any(which_metric == "SCRPS")) {
-    get_SCRPS <- TRUE
-  }
-
-  if(any(which_metric == "AnPIT")) {
-    get_AnPIT <- TRUE
-  }
-
-  if(!inherits(control_sim,
-               what = "mcmc.RiskMap", which = FALSE)) {
-    stop ("the argument passed to 'control_sim' must be an output
-                                                  from the function set_control_sim; see ?set_control_sim
-                                                  for more details")
-
-  }
-
-
-  # Select test set
+  ## ─────────────────────────────── test–train splitting ────────────────────── ##
   object1 <- object[[1]]
   data_sf <- object1$data_sf
-  if(method=="cluster") {
-    data_split <-
-      spatial_clustering_cv(data = data_sf,
-                            v = fold,
-                            repeats = iter,...)
-  } else if(method=="regularized") {
-    data_split <- list(splits = list())
-    for(i in 1:iter) {
-      data_split$splits[[i]] <- list()
-      data_split$splits[[i]]$data_test <- subsample.distance(data_sf, size = n_size,
-                            d = min_dist*1000,...)
-      data_split$splits[[i]]$out_id <- terra::match(data_split$splits[[i]]$data_test$geometry, data_sf$geometry)
-      data_split$splits[[i]]$in_id <- (1:nrow(data_sf))[-data_split$splits[[i]]$out_id]
-      data_split$splits[[i]]$data <- data_sf[data_split$splits[[i]]$in_id,]
+
+  if (method == "cluster") {
+    data_split <- spatial_clustering_cv(data = data_sf,
+                                        v = fold, repeats = iter, ...)
+  } else {                                            # regularised distance split
+    data_split <- list(splits = vector("list", iter))
+    for (i in seq_len(iter)) {
+      data_split$splits[[i]]            <- list()
+      ## --------- sample at the *location* level (duplicates removed) -------- ##
+      locations_sf                       <- data_sf[!duplicated(st_as_text(data_sf$geometry)), ]
+      data_split$splits[[i]]$data_test   <- subsample.distance(
+        locations_sf, size = n_size, d = min_dist * 1000, ...
+      )
+      test_geom                          <- st_as_text(data_split$splits[[i]]$data_test$geometry)
+      in_test                            <- st_as_text(data_sf$geometry) %in% test_geom
+      data_split$splits[[i]]$out_id      <- which(in_test)
+      data_split$splits[[i]]$in_id       <- which(!in_test)
+      data_split$splits[[i]]$data        <- data_sf[!in_test, ]
     }
   }
-  if(method=="cluster") {
-    n_iter <- iter*fold
-  } else {
-    n_iter <- iter
-  }
 
-  if(plot_fold) {
-    if(method=="cluster") {
+  n_iter <- if (method == "cluster") iter * fold else iter
+  if (plot_fold) {
+    if (method == "cluster") {
       print(autoplot(data_split))
-    } else if (method=="regularized") {
-      create_plot <- function(sf_object, fold_no) {
-        ggplot(data = sf_object) +
-          geom_sf() +
-          theme_minimal() +
-          ggtitle(paste("Subset no.",fold_no))
-      }
-      plots <- list()
-      for(i in 1:n_iter) {
-        plots[[i]] <- create_plot(data_split$splits[[i]]$data_test,
-                                  i)
-      }
-      if(n_iter > 1) {
-        grid.arrange(grobs = plots, ncol = 2)
-      } else {
-        print(plots)
-      }
+    } else {
+      library(gridExtra)
+      plots <- lapply(seq_len(n_iter), function(i)
+        ggplot(data_split$splits[[i]]$data_test) +
+          geom_sf() + theme_minimal() +
+          ggtitle(paste("Subset", i))
+      )
+      if (n_iter > 1) grid.arrange(grobs = plots, ncol = 2) else print(plots[[1]])
     }
   }
 
-  n_models <- length(object)
+  ## ───────────────────────── initialise output containers ──────────────────── ##
+  n_models   <- length(object)
   model_names <- names(object)
-  out <- list(test_set = list(), model = list())
-  for(h in 1:n_models) {
+  out <- list(test_set = vector("list", n_iter), model = list())
 
-    par_hat <- coef(object[[h]])
-    den_name <- as.character(object[[h]]$call$den)
-    if(any(object[[h]]$cov_offset==0)) object[[h]]$cov_offset <- NULL
+  ## ─────────────────────────── iterate over models ─────────────────────────── ##
+  for (h in seq_len(n_models)) {
 
-    refit <- list()
+    par_hat   <- coef(object[[h]])
+    den_name  <- as.character(object[[h]]$call$den)
+    fam       <- object[[h]]$family             # "gaussian", "binomial", "poisson"
+    linkfun   <- switch(fam,
+                        gaussian = identity,
+                        binomial = function(x) plogis(x),
+                        poisson  = function(x) exp(x))
 
-    for(i in 1:n_iter) {
-      new_data_i <- data_sf[data_split$splits[[i]]$in_id,]
-      if(!keep_par_fixed) {
-        message("\n Re-estimating the model for the Subset no. ",i,"\n")
+    ## containers for this model --------------------------------------------- ##
+    if (get_CRPS)   CRPS  <- vector("list", n_iter)
+    if (get_SCRPS) { y_CRPS <- vector("list", n_iter)
+    SCRPS  <- vector("list", n_iter) }
+    if (get_AnPIT) {           # will store PIT if Gaussian
+      if (fam == "gaussian")  PIT  <- vector("list", n_iter)
+      else                    AnPIT <- vector("list", n_iter)
+    }
 
-        refit[[i]] <- eval(bquote(
-          glgpm(
-            formula = .(object[[h]]$formula),
-            data = new_data_i,
-            cov_offset = .(object[[h]]$cov_offset),
-            family = .(object[[h]]$family),
-            crs =  .(object[[h]]$crs),
-            scale_to_km = .(object[[h]]$scale_to_km),
+    ## ───────────── iterate over CV splits (refit where requested) ─────────── ##
+    for (i in seq_len(n_iter)) {
+
+      ## ------------- optionally refit -------------------------------------- ##
+      if (!keep_par_fixed) {
+        message("\nRe-estimating model for subset ", i)
+        refit_i <- eval(bquote(
+          glgpm(.(
+            formula      = object[[h]]$formula,
+            data         = data_sf[data_split$splits[[i]]$in_id, ],
+            cov_offset   = .(object[[h]]$cov_offset),
+            family       = .(fam),
+            crs          = .(object[[h]]$crs),
+            scale_to_km  = .(object[[h]]$scale_to_km),
             control_mcmc = control_sim,
-            fix_var_me = .(object[[h]]$fix_var_me),
-            den = .(as.name(den_name)),
-            messages = FALSE,
-            start_pars = par_hat
-          )
+            fix_var_me   = .(object[[h]]$fix_var_me),
+            den          = .(as.name(den_name)),
+            messages     = FALSE,
+            start_pars   = par_hat
+          ))
         ))
-      } else {
-        refit[[i]] <- object[[h]]
-        refit[[i]]$data_sf <- object[[h]]$data_sf[data_split$splits[[i]]$in_id,]
-        refit[[i]]$units_m <- object[[h]]$units_m[data_split$splits[[i]]$in_id]
-        refit[[i]]$coords <- object[[h]]$coords[data_split$splits[[i]]$in_id,]
-        refit[[i]]$y <- object[[h]]$y[data_split$splits[[i]]$in_id]
-        refit[[i]]$D <- as.matrix(object[[h]]$D[data_split$splits[[i]]$in_id,])
-        colnames(refit[[i]]$D) <- colnames(object[[h]]$D)
-        refit[[i]]$ID_coords <- compute_ID_coords(refit[[i]]$data_sf)$ID_coords
-        if(!is.null(object[[h]]$cov_offset)) {
-          refit[[i]]$cov_offset <- object[[h]]$cov_offset[data_split$splits[[i]]$in_id]
-        }
+      } else {                                  # quick copy without re-fitting
+        refit_i <- object[[h]]
+        keep    <- data_split$splits[[i]]$in_id
+        drop    <- data_split$splits[[i]]$out_id
+        refit_i$data_sf  <- refit_i$data_sf [keep, ]
+        refit_i$units_m  <- refit_i$units_m[keep]
+
+        keep_coord <- unique(refit_i$ID_coords[keep])   # rows in coords to keep
+        refit_i$coords <- refit_i$coords[keep_coord, , drop = FALSE]
+
+        refit_i$y        <- refit_i$y      [keep]
+        refit_i$D        <- refit_i$D      [keep, ]
+        if (!is.null(refit_i$cov_offset))
+          refit_i$cov_offset <- refit_i$cov_offset[keep]
+        refit_i$ID_coords <- compute_ID_coords(refit_i$data_sf)$ID_coords
       }
-    }
 
-    if(object[[h]]$family=="gaussian") {
-      f_glm <- function(x) x
-    } else if(object[[h]]$family=="binomial") {
-      f_glm <- function(x) exp(x)/(1+exp(x))
-    } else if(object[[h]]$family=="poisson") {
-      f_glm <- function(x) exp(x)
-    }
+      ## ------------- posterior predictive samples for *held-out* points ---- ##
+      data_test_i <- data_sf[data_split$splits[[i]]$out_id, ]
+      data_test_i <- data_test_i[complete.cases(st_drop_geometry(data_test_i)), ]
 
-    pred_new_data_S <- list()
-    pred_lp <- list()
+      out$test_set[[i]] <- data_test_i
+      pred_coff_i <- if(is.null(object[[h]]$cov_offset)) {
+        rep(0, nrow(data_test_i))
+      } else {
+        object[[h]]$cov_offset[data_split$splits[[i]]$out_id]
+      }
 
-    if(!is.null(object[[h]]$fix_tau2)) {
-      if(object[[h]]$fix_tau2==0) i_ne <- FALSE
-    } else {
-      i_ne <- TRUE
-    }
-    if(is.null(object[[h]]$cov_offset)) {
-      i_co <- FALSE
-    } else {
-      i_co <- TRUE
-    }
+      message("\nModel: ", model_names[h],
+              "\nSpatial prediction for subset ", i, "\n")
 
-    if(get_CRPS) {
-      CRPS <- list()
-    }
+      pred_S <- pred_over_grid(object       = refit_i,
+                               grid_pred     = st_as_sfc(data_test_i),
+                               control_sim   = control_sim,
+                               predictors    = data_test_i,
+                               pred_cov_offset = pred_coff_i,
+                               type          = "marginal",
+                               messages      = FALSE)
 
-    if(get_SCRPS) {
-      y_CRPS <- list()
-      SCRPS <- list()
-    }
+      pred_lp  <- pred_target_grid(pred_S,
+                                   include_nugget    = is.null(refit_i$fix_tau2) ||
+                                     refit_i$fix_tau2 != 0,
+                                   include_cov_offset = !all(refit_i$cov_offset==0))
 
-    if(get_AnPIT) {
-      AnPIT <- list()
-      u_val <- seq(0,1,length=1000)
-      compute_npit <- function(y, u, cdf_func) {
-        f_y_minus_1 <- cdf_func(y - 1)
-        f_y <- cdf_func(y)
+      eta_samp <- pred_lp$lp_samples                  # linear predictor samples
+      if(is.null(refit_i$fix_var_me)) {
+        sigma2_me <- coef(refit_i)$sigma2_me
+      } else {
+        sigma2_me <- refit_i$fix_var_me
+      }
+      eta_samp <- eta_samp + sqrt(sigma2_me)*rnorm(length(eta_samp))
 
-        if (u <= f_y_minus_1) {
-          return(0)
-        } else if (u <= f_y) {
-          return((u - f_y_minus_1) / (f_y - f_y_minus_1))
+
+      mu_samp  <- linkfun(eta_samp)                   # on response scale
+
+      n_pred   <- nrow(eta_samp)
+      n_draw   <- ncol(eta_samp)
+
+      if (get_CRPS)   CRPS [[i]] <- numeric(n_pred)
+      if (get_SCRPS) { y_CRPS[[i]] <- numeric(n_pred)
+      SCRPS [[i]] <- numeric(n_pred) }
+
+      if (get_AnPIT) {
+        if (fam == "gaussian")  {
+          PIT_i  <- numeric(n_pred)
         } else {
-          return(1)
-        }
-      }
-      compute_npit <- Vectorize(compute_npit, "u")
-    }
-
-    for(i in 1:n_iter) {
-
-      data_sf_i <- object[[h]]$data_sf[-data_split$splits[[i]]$in_id,]
-      out$test_set[[i]] <- data_sf_i
-      if(!is.null(object[[h]]$cov_offset)) {
-        pred_cov_offset_i <- object[[h]]$cov_offset[-data_split$splits[[i]]$in_id]
-      } else {
-        pred_cov_offset_i <- rep(0,nrow(data_sf_i))
-      }
-
-      message("\n Model: ", paste(model_names[h]),"\n Spatial prediction for the Subset no. ",i,"\n")
-
-      pred_new_data_S[[i]] <-
-        pred_over_grid(object = refit[[i]], grid_pred = st_as_sfc(data_sf_i),
-                       control_sim = control_sim,
-                       predictors = data_sf_i, pred_cov_offset = pred_cov_offset_i,
-                       type = "marginal",
-                       messages = FALSE)
-
-      pred_lp[[i]] <-
-        pred_target_grid(pred_new_data_S[[i]],
-                         include_nugget = i_ne,
-                         include_cov_offset = i_co)
-
-      f_glm_samples <- f_glm(pred_lp[[i]]$lp_samples)
-
-      n_pred <- nrow(data_sf_i)
-      n_samples <- ncol(pred_lp[[i]]$lp_samples)
-
-      F_list <- list()
-      units_m_i <- object[[h]]$units_m[-data_split$splits[[i]]$in_id]
-      y_i <- object[[h]]$y[-data_split$splits[[i]]$in_id]
-
-      if(get_CRPS) {
-        CRPS[[i]] <- rep(NA, n_pred)
-      }
-      if(get_SCRPS) {
-        y_CRPS[[i]] <- rep(NA, n_pred)
-        SCRPS[[i]] <- rep(NA, n_pred)
-      }
-
-      if(get_AnPIT) {
-        AnPIT_i <- matrix(NA, nrow = length(u_val),
-                                 ncol = n_pred)
-        AnPIT[[i]] <- rep(NA, length(u_val))
-      }
-
-      for(j in 1:n_pred) {
-        if(object[[h]]$family == "binomial") {
-          y_samples <- rbinom(n_samples, units_m_i[j], prob = f_glm_samples[j,])
-        } else if(object[[h]]$family == "poisson") {
-          y_samples <- rpois(n_samples, lambda = units_m_i[j]*f_glm_samples[j,])
-        }
-        F_list[[j]] <- ecdf(y_samples)
-        if(object[[h]]$family=="binomial" | object[[h]]$family=="poisson") {
-
-          F_list_j <- function(x) F_list[[j]](x*units_m_i[j])
-
-          if(get_CRPS) {
-            CRPS[[i]][j] <- integrate(function(x) -(F_list_j(x)-1*(x>=y_i[j]/units_m_i[j]))^2,
-                                      lower = 0, upper = 1,
-                                      subdivisions = 10000)$value
-          }
-
-          if(get_SCRPS) {
-            y_CRPS[[i]][j] <- mean(sapply(y_samples,
-                                          function(y) integrate(function(x)
-                                            -(F_list_j(x)-1*(x>=y/units_m_i[j]))^2,
-                                            lower = 0, upper = 1,
-                                            subdivisions = 10000)$value))
-            SCRPS[[i]][j] <- -0.5*(1+CRPS[[i]][j]/y_CRPS[[i]][j]+
-                                     log(2*abs(y_CRPS[[i]][j])))
-          }
-
-          if(get_AnPIT) {
-            AnPIT_i[,j] <- compute_npit(y_i[j], u_val, F_list[[j]])
+          u_val      <- seq(0, 1, length.out = 1000)
+          AnPIT_i    <- matrix(NA_real_, nrow = length(u_val), ncol = n_pred)
+          npit_fun   <- function(y, u, Fk) {
+            F_y1 <- if (y == 0) 0 else Fk[y]
+            F_y  <- Fk[y + 1]
+            ifelse(u <= F_y1, 0,
+                   ifelse(u <= F_y, (u - F_y1) / (F_y - F_y1), 1))
           }
         }
       }
-      if(get_AnPIT) {
-        AnPIT[[i]] <- apply(AnPIT_i, 1, mean)
+
+      ## --------------------------- loop over locations --------------------- ##
+      units_m_i <- object[[h]]$units_m[data_split$splits[[i]]$out_id]
+      y_i       <- object[[h]]$y      [data_split$splits[[i]]$out_id]
+
+      for (j in seq_len(n_pred)) {
+        ## ---------- family-specific predictive pmf/cdf --------------------- ##
+        if (fam == "gaussian") {
+
+          mu_j <- mean(mu_samp[j, ])
+          sd_j <- sd  (mu_samp[j, ])
+
+          ## CRPS closed form
+          if (get_CRPS)
+            CRPS[[i]][j] <- sd_j * crps_gaussian(y_i[j], mu_j, sd_j)
+
+          ## SCRPS (scaled)
+          if (get_SCRPS) {
+            y_CRPS[[i]][j] <- sd_j / sqrt(pi)
+            SCRPS [[i]][j] <- -0.5 * (1 + CRPS[[i]][j] / y_CRPS[[i]][j] +
+                                        log(2 * abs(y_CRPS[[i]][j])))
+          }
+
+          ## PIT
+          if (get_AnPIT) {
+            PIT_i[j] <- pnorm(y_i[j], mean = mu_j, sd = sd_j)
+          }
+        } else {                                # ----- Binomial / Poisson ---- #
+          if (fam == "binomial") {
+            y_samp <- rbinom(n_draw, size = units_m_i[j], prob = mu_samp[j, ])
+            support <- 0:units_m_i[j]
+          } else {                              # Poisson
+            lambda  <- units_m_i[j] * mu_samp[j, ]
+            y_samp <- rpois(n_draw, lambda)
+            support <- 0:max(max(y_samp), y_i[j], qpois(0.999, mean(lambda)))
+          }
+
+          ## empirical pmf / cdf from the draws
+          pk           <- tabulate(y_samp + 1, nbins = length(support)) / n_draw
+          Fk           <- cumsum(pk)
+
+          ## CRPS discrete
+          if (get_CRPS)
+            CRPS[[i]][j] <- crps_discrete(y_i[j], Fk)
+
+          ## SCRPS
+          if (get_SCRPS) {
+            y_CRPS[[i]][j] <- exp_crps_discrete(Fk, pk)
+            SCRPS [[i]][j] <- -0.5 * (1 + CRPS[[i]][j] / y_CRPS[[i]][j] +
+                                        log(2 * abs(y_CRPS[[i]][j])))
+          }
+
+          ## AnPIT (aggregate NPIT over u grid)
+          if (get_AnPIT) {
+            npit_u <- vapply(u_val,
+                             npit_fun, numeric(1),
+                             y = y_i[j], Fk = Fk)
+            AnPIT_i[, j] <- npit_u
+          }
+        } # end family branch
+      }   # end j loop
+
+      ## store metrics for this subset --------------------------------------- ##
+      if (get_AnPIT) {
+        if (fam == "gaussian") {
+          PIT[[i]]   <- PIT_i
+        } else  {
+          AnPIT[[i]] <- rowMeans(AnPIT_i)
+        } # end j loop
+
+        ## store metrics for this subset --------------------------------------- ##
+        if (get_AnPIT) {
+          if (fam == "gaussian") {
+            PIT[[i]]   <- PIT_i
+          } else  {
+            AnPIT[[i]] <- rowMeans(AnPIT_i)
+          }
+        }
+      }   # end i (fold) loop
+
+      ## ─────────────── finalise output for this model ─────────────────────── ##
+      out$model[[model_names[h]]] <- list(score = list())
+      if (get_CRPS)  out$model[[model_names[h]]]$score$CRPS  <- CRPS
+      if (get_SCRPS) out$model[[model_names[h]]]$score$SCRPS <- SCRPS
+
+      if (get_AnPIT) {
+        if (fam == "gaussian") {
+          out$model[[model_names[h]]]$PIT   <- PIT
+        } else {
+          out$model[[model_names[h]]]$AnPIT <- AnPIT
+        }
       }
     }
-    out$model[[paste(model_names[h])]] <- list(score = list())
-    if(get_CRPS) {
-      out$model[[paste(model_names[h])]]$score$CRPS <- CRPS
-    }
-
-    if(get_SCRPS) {
-      out$model[[paste(model_names[h])]]$score$SCRPS <- SCRPS
-    }
-
-    if(get_AnPIT) {
-      out$model[[paste(model_names[h])]]$AnPIT <- AnPIT
-    }
-    out$model[[paste(model_names[h])]]$refit <- refit
   }
 
   class(out) <- "RiskMap.spatial.cv"
   return(out)
 }
+
 
 ##' Simulate surface data based on a spatial model
 ##'
