@@ -30,7 +30,7 @@
 ##'
 
 pred_over_grid <- function(object,
-                   grid_pred,
+                   grid_pred = NULL,
                    predictors = NULL,
                    re_predictors = NULL,
                    pred_cov_offset = NULL,
@@ -43,8 +43,9 @@ pred_over_grid <- function(object,
          the function 'glgpm'")
   }
 
+  obs_loc <- is.null(grid_pred)
   if(!inherits(grid_pred,
-               what = "sfc", which = FALSE)) {
+               what = "sfc", which = FALSE) & !obs_loc) {
     stop("The object passed to 'grid_pred' must be an object
          of class 'sfc'")
   }
@@ -57,7 +58,12 @@ pred_over_grid <- function(object,
 
   }
 
-  grid_pred <- st_transform(grid_pred,crs = object$crs)
+  if(obs_loc) {
+    predictors <- as.data.frame(st_drop_geometry(object$data_sf))
+    grid_pred <- st_as_sfc(object$data_sf)
+  } else {
+    grid_pred <- st_transform(grid_pred,crs = object$crs)
+  }
 
   grp <- st_coordinates(grid_pred)
   n_pred <- nrow(grp)
@@ -212,14 +218,18 @@ pred_over_grid <- function(object,
     U_pred <- t(sapply(1:n_pred,
                        function(i) sqrt((object$coords[object$ID_coords,1]-grp[i,1])^2+
                                         (object$coords[object$ID_coords,2]-grp[i,2])^2)))
-  } else {
+  } else if(object$family!="gaussian" & !obs_loc) {
     U_pred <- t(sapply(1:n_pred,
                        function(i) sqrt((object$coords[,1]-grp[i,1])^2+
                                           (object$coords[,2]-grp[i,2])^2)))
   }
+
   U <- dist(object$coords)
-  C <- par_hat$sigma2*matern_cor(U_pred, phi = par_hat$phi,
-                                 kappa = object$kappa)
+  if(!obs_loc & object$family=="gaussian") {
+
+    C <- par_hat$sigma2*matern_cor(U_pred, phi = par_hat$phi,
+                                   kappa = object$kappa)
+  }
   mu <- as.numeric(object$D%*%par_hat$beta)
 
   if(control_sim$linear_model) {
@@ -241,9 +251,13 @@ pred_over_grid <- function(object,
 
   dast_model <- !is.null(object$power_val)
   if(object$family!="gaussian") {
+
     Sigma <- par_hat$sigma2*R
-    Sigma_inv <- solve(Sigma)
-    A <- C%*%Sigma_inv
+    if(!obs_loc) {
+      Sigma_inv <- solve(Sigma)
+      A <- C%*%Sigma_inv
+    }
+
 
     if(dast_model) {
       alpha <- par_hat$alpha
@@ -269,24 +283,33 @@ pred_over_grid <- function(object,
                               family = object$family, control_mcmc = control_sim,
                               messages = messages)
     }
-    mu_cond_S <- A%*%t(simulation$samples$S)
-    if(type=="marginal") {
-      sd_cond_S <- sqrt(par_hat$sigma2-diag(A%*%t(C)))
-      out$S_samples <- sapply(1:n_samples,
-                              function(i)
-                                mu_cond_S[,i]+
-                                sd_cond_S*rnorm(n_pred))
+
+    if(!obs_loc) {
+      mu_cond_S <- A%*%t(simulation$samples$S)
     } else {
-      U_pred_o <- dist(grp)
-      Sigma_pred <-  par_hat$sigma2*matern_cor(U_pred_o, phi = par_hat$phi,
-                                               kappa = object$kappa,
-                                               return_sym_matrix = TRUE)
-      Sigma_cond <- Sigma_pred - A%*%t(C)
-      Sigma_cond_sroot <- t(chol(Sigma_cond))
-      out$S_samples <- sapply(1:n_samples,
-                              function(i)
-                                mu_cond_S[,i]+
-                                Sigma_cond_sroot%*%rnorm(n_pred))
+      out$S_samples <- t(simulation$samples$S)
+    }
+    if(type=="marginal") {
+      if(!obs_loc) {
+        sd_cond_S <- sqrt(par_hat$sigma2-diag(A%*%t(C)))
+        out$S_samples <- sapply(1:n_samples,
+                                function(i)
+                                  mu_cond_S[,i]+
+                                  sd_cond_S*rnorm(n_pred))
+      }
+    } else {
+      if(!obs_loc) {
+        U_pred_o <- dist(grp)
+        Sigma_pred <-  par_hat$sigma2*matern_cor(U_pred_o, phi = par_hat$phi,
+                                                 kappa = object$kappa,
+                                                 return_sym_matrix = TRUE)
+        Sigma_cond <- Sigma_pred - A%*%t(C)
+        Sigma_cond_sroot <- t(chol(Sigma_cond))
+        out$S_samples <- sapply(1:n_samples,
+                                function(i)
+                                  mu_cond_S[,i]+
+                                  Sigma_cond_sroot%*%rnorm(n_pred))
+      }
     }
   } else {
 
@@ -438,6 +461,8 @@ pred_over_grid <- function(object,
     if(is.null(par_hat$alpha)) out$fix_alpha <- object$fix_alpha
     out$power_val <- object$power_val
   }
+  out$obs_loc <- obs_loc
+  if(obs_loc) out$ID_coords <- object$ID_coords
   out$inter_f <- inter_f
   out$family <- object$family
   out$par_hat <- par_hat
@@ -564,16 +589,21 @@ pred_target_grid <- function(object,
     object$S_samples <- object$S_samples+Z_sim
   }
 
+  if(object$obs_loc) {
+    ID_coords <- object$ID_coords
+  } else {
+    ID_coords <- 1:n_pred
+  }
   if(is.matrix(mu_target)) {
     out$lp_samples <- sapply(1:n_samples,
                              function(i)
                                mu_target[,i] + cov_offset +
-                               object$S_samples[,i])
+                               object$S_samples[ID_coords,i])
   } else {
     out$lp_samples <- sapply(1:n_samples,
                              function(i)
                                mu_target + cov_offset +
-                               object$S_samples[,i])
+                               object$S_samples[ID_coords,i])
   }
 
 
@@ -609,7 +639,7 @@ pred_target_grid <- function(object,
                                                  mda_times = object$mda_times,
                               mda_grid, alpha = alpha,
                               gamma = gamma, kappa = object$power_val)
-      target_samples_i <- target_samples_i*mda_effect_time_pred
+      target_samples_i <- target_samples_i*mda_effect_time_pred[ID_coords]
 
     }
     out$target[[paste(names_f[i])]] <- list()
