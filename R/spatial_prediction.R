@@ -225,7 +225,7 @@ pred_over_grid <- function(object,
   }
 
   U <- dist(object$coords)
-  if(!obs_loc & object$family=="gaussian") {
+  if(!obs_loc) {
 
     C <- par_hat$sigma2*matern_cor(U_pred, phi = par_hat$phi,
                                    kappa = object$kappa)
