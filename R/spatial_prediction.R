@@ -30,43 +30,90 @@
 ##'
 
 pred_over_grid <- function(object,
-                   grid_pred = NULL,
-                   predictors = NULL,
-                   re_predictors = NULL,
-                   pred_cov_offset = NULL,
-                   control_sim = set_control_sim(),
-                   type = "marginal",
-                   messages = TRUE) {
-  if(!inherits(object,
-               what = "RiskMap", which = FALSE)) {
-    stop("The object passed to 'object' must be an output of
-         the function 'glgpm'")
+                           grid_pred = NULL,
+                           predictors = NULL,
+                           re_predictors = NULL,
+                           pred_cov_offset = NULL,
+                           control_sim = set_control_sim(),
+                           type = "marginal",
+                           messages = TRUE) {
+
+  # Check if grid_pred is a list of sfc POINT geometries
+  list_mode <- is.list(grid_pred) && !is.null(grid_pred) &
+               !any(class(grid_pred)=="sf" | class(grid_pred)=="sfc")
+
+  if (list_mode) {
+
+    if (type != "joint") {
+      stop("When 'grid_pred' is a list, 'type' must be 'joint'.")
+    }
+
+    if (length(grid_pred) == 0L) {
+      stop("'grid_pred' is a list but has length 0.")
+    }
+
+    # Convert sf to sfc where needed
+    grid_pred <- lapply(grid_pred, function(g) {
+      if (inherits(g, "sf")) sf::st_geometry(g) else g
+    })
+
+    # Ensure each element is sfc of POINTs
+    ok_geom <- vapply(
+      grid_pred,
+      function(g) {
+        inherits(g, "sfc") && all(sf::st_geometry_type(g) == "POINT")
+      },
+      logical(1)
+    )
+
+    if (!all(ok_geom)) {
+      stop("Each element of 'grid_pred' must be an 'sf' or 'sfc' object with POINT geometries.")
+    }
+
+  } else if (!is.null(grid_pred)) {
+
+    # Check single grid_pred
+    if (inherits(grid_pred, "sf")) {
+      grid_pred <- sf::st_geometry(grid_pred)
+    }
+
+    if (!inherits(grid_pred, "sfc") || !all(sf::st_geometry_type(grid_pred) == "POINT")) {
+      stop("'grid_pred' must be an 'sf' or 'sfc' object with POINT geometries.")
+    }
+
   }
 
   obs_loc <- is.null(grid_pred)
-  if(!inherits(grid_pred,
-               what = "sfc", which = FALSE) & !obs_loc) {
-    stop("The object passed to 'grid_pred' must be an object
-         of class 'sfc'")
-  }
+
 
   if(!inherits(control_sim,
-                 what = "mcmc.RiskMap", which = FALSE)) {
-      stop ("the argument passed to 'control_sim' must be an output
+               what = "mcmc.RiskMap", which = FALSE)) {
+    stop ("the argument passed to 'control_sim' must be an output
                                                   from the function set_control_sim; see ?set_control_sim
                                                   for more details")
 
   }
 
-  if(obs_loc) {
-    predictors <- as.data.frame(st_drop_geometry(object$data_sf))
-    grid_pred <- st_as_sfc(object$data_sf)
+  if (obs_loc) {
+    predictors <- as.data.frame(sf::st_drop_geometry(object$data_sf))
+    grid_pred <- sf::st_as_sfc(object$data_sf)
+    list_mode <- FALSE  # force off
   } else {
-    grid_pred <- st_transform(grid_pred,crs = object$crs)
+    if (list_mode) {
+      grid_pred <- lapply(grid_pred, function(g) sf::st_transform(g, crs = object$crs))
+    } else {
+      grid_pred <- sf::st_transform(grid_pred, crs = object$crs)
+    }
   }
 
-  grp <- st_coordinates(grid_pred)
-  n_pred <- nrow(grp)
+  if (list_mode) {
+    grp <- lapply(grid_pred, sf::st_coordinates)
+    n_pred <- vapply(grp, nrow, integer(1))
+  } else {
+    grp <- sf::st_coordinates(grid_pred)
+    n_pred <- nrow(grp)
+  }
+
   par_hat <- coef(object)
   object$D <- as.matrix(object$D)
   p <- ncol(object$D)
@@ -109,60 +156,122 @@ pred_over_grid <- function(object,
             if you wish to also include the predictions for the unstructured random
             effects then set type = 'joint'")
   }
+  if (!is.null(predictors)) {
 
-  if(!is.null(predictors)) {
+    if (list_mode) {
 
-    if(!is.data.frame(predictors)) stop("'predictors' must be an object of class 'data.frame'")
-    if(nrow(predictors)!=n_pred) stop("the values provided for 'predictors' do not match the prediction grid passed to 'grid_pred'")
+      D_pred <- vector("list", length(predictors))
+      mu_pred <- vector("list", length(predictors))
 
-    if(any(is.na(predictors))) {
-      warning("There are missing values in 'predictors'; these values have been removed
-              alongside the corresponding prediction locations")
-      if(any(is.na(re_predictors))) {
-        warning("There are missing values in 're_predictors'; these values have been removed
-              alongside the corresponding prediction locations")
+      for (i in seq_along(predictors)) {
+        pred_i <- predictors[[i]]
+        grid_i <- grid_pred[[i]]
+
+        if (!is.data.frame(pred_i)) {
+          stop(sprintf("'predictors[[%d]]' must be an object of class 'data.frame'", i))
+        }
+
+        if (nrow(pred_i) != n_pred[i]) {
+          stop(sprintf("Rows of 'predictors[[%d]]' (%d) do not match grid_pred[[%d]] (%d)",
+                       i, nrow(pred_i), i, n_pred[i]))
+        }
+
+        if (any(is.na(pred_i))) {
+          warning(sprintf("Missing values in 'predictors[[%d]]'; removing affected locations", i))
+
+          if (!is.null(re_predictors) && any(is.na(re_predictors[[i]]))) {
+            warning(sprintf("Missing values in 're_predictors[[%d]]'; removing affected locations", i))
+          }
+
+          if (!is.null(re_predictors)) {
+            re_pred_i <- re_predictors[[i]]
+            if (nrow(re_pred_i) != n_pred[i]) {
+              stop(sprintf("Rows of 're_predictors[[%d]]' do not match 'grid_pred[[%d]]'", i, i))
+            }
+
+            comb_pred <- data.frame(pred_i, re_pred_i)
+            ind_c <- complete.cases(comb_pred)
+
+            predictors[[i]] <- pred_i[ind_c, , drop = FALSE]
+            re_predictors[[i]] <- re_pred_i[ind_c, , drop = FALSE]
+          } else {
+            ind_c <- complete.cases(pred_i)
+            predictors[[i]] <- pred_i[ind_c, , drop = FALSE]
+          }
+
+          grid_pred[[i]] <- grid_i[ind_c]
+          grp[[i]] <- sf::st_coordinates(grid_pred[[i]])
+          n_pred[i] <- nrow(grp[[i]])
+        }
+
+        mf_pred <- model.frame(inter_lt_f$pf, data = predictors[[i]], na.action = na.fail)
+        D_pred[[i]] <- as.matrix(model.matrix(attr(mf_pred, "terms"), data = predictors[[i]]))
+
+        if (ncol(D_pred[[i]]) != ncol(object$D)) {
+          stop(sprintf("The predictors in group %d do not match the model formula.", i))
+        }
+
+        mu_pred[[i]] <- as.numeric(D_pred[[i]] %*% par_hat$beta)
       }
-      if(!is.null(re_predictors)) {
-        if(nrow(re_predictors)!=n_pred) stop("the values provided for 're_predictors' do not match the prediction grid passed to 'grid_pred'")
 
-        comb_pred <- data.frame(predictors,
-                                re_predictors)
-        ind_c <- complete.cases(as.data.frame(st_drop_geometry(comb_pred)))
-        predictors_aux <- data.frame(na.omit(comb_pred)[,1:ncol(predictors)])
-        colnames(predictors_aux) <- colnames(predictors)
-        predictors <- predictors_aux
-
-        re_predictors_aux <- data.frame(na.omit(comb_pred)[,(ncol(predictors)+1):
-                                                            (ncol(predictors)+
-                                                             ncol(re_predictors))])
-        colnames(re_predictors_aux) <- colnames(re_predictors_aux)
-        re_predictors <- re_predictors_aux
-      } else {
-        comb_pred <- predictors
-        ind_c <- complete.cases(as.data.frame(st_drop_geometry(comb_pred)))
-        predictors_aux <- data.frame(na.omit(comb_pred))
-        colnames(predictors_aux) <- colnames(predictors)
-        predictors <- predictors_aux
+    } else {
+      # === Original non-list version ===
+      if (!is.data.frame(predictors)) {
+        stop("'predictors' must be an object of class 'data.frame'")
       }
-      grid_pred_aux <- st_coordinates(grid_pred)[ind_c,]
-      grid_pred <- st_as_sf(data.frame(grid_pred_aux),
-                            coords = c("X","Y"),
-                            crs = st_crs(grid_pred)$input)
-      grp <- st_coordinates(grid_pred)
-      n_pred <- nrow(grp)
 
+      if (nrow(predictors) != n_pred) {
+        stop("The values provided for 'predictors' do not match the prediction grid passed to 'grid_pred'")
+      }
+
+      if (any(is.na(predictors))) {
+        warning("There are missing values in 'predictors'; these values have been removed alongside the corresponding prediction locations")
+
+        if (!is.null(re_predictors) && any(is.na(re_predictors))) {
+          warning("There are missing values in 're_predictors'; these values have been removed alongside the corresponding prediction locations")
+        }
+
+        if (!is.null(re_predictors)) {
+          if (nrow(re_predictors) != n_pred) {
+            stop("The values provided for 're_predictors' do not match the prediction grid passed to 'grid_pred'")
+          }
+
+          comb_pred <- data.frame(predictors, re_predictors)
+          ind_c <- complete.cases(comb_pred)
+
+          predictors <- predictors[ind_c, , drop = FALSE]
+          re_predictors <- re_predictors[ind_c, , drop = FALSE]
+        } else {
+          ind_c <- complete.cases(predictors)
+          predictors <- predictors[ind_c, , drop = FALSE]
+        }
+
+        grid_pred <- grid_pred[ind_c]
+        grp <- sf::st_coordinates(grid_pred)
+        n_pred <- nrow(grp)
+      }
+
+      mf_pred <- model.frame(inter_lt_f$pf, data = predictors, na.action = na.fail)
+      D_pred <- as.matrix(model.matrix(attr(mf_pred, "terms"), data = predictors))
+
+      if (ncol(D_pred) != ncol(object$D)) {
+        stop("The provided variables in 'predictors' do not match the number of explanatory variables used to fit the model.")
+      }
+
+      mu_pred <- as.numeric(D_pred %*% par_hat$beta)
     }
 
-    mf_pred <- model.frame(inter_lt_f$pf,data=predictors, na.action = na.fail)
-    D_pred <- as.matrix(model.matrix(attr(mf_pred,"terms"),data=predictors))
-    if(ncol(D_pred)!=ncol(object$D)) stop("the provided variables in 'predictors' do not match the number of explanatory variables used to fit the model.")
-    mu_pred <- as.numeric(D_pred%*%par_hat$beta)
+  } else if (intercept_only) {
+    mu_pred <- if (list_mode) {
+      lapply(n_pred, function(n) rep(par_hat$beta, n))
+    } else {
+      par_hat$beta
+    }
 
-  } else if(intercept_only)  {
-    mu_pred <- par_hat$beta
   } else {
     mu_pred <- 0
   }
+
 
   if(n_re>0) {
 
@@ -213,24 +322,59 @@ pred_over_grid <- function(object,
   out$grid_pred <- grid_pred
   out$par_hat <- object$par_hat
 
-  if(object$scale_to_km) grp <- grp/1000
-  if(object$family=="gaussian") {
-    U_pred <- t(sapply(1:n_pred,
-                       function(i) sqrt((object$coords[object$ID_coords,1]-grp[i,1])^2+
-                                        (object$coords[object$ID_coords,2]-grp[i,2])^2)))
-  } else if(object$family!="gaussian" & !obs_loc) {
-    U_pred <- t(sapply(1:n_pred,
-                       function(i) sqrt((object$coords[,1]-grp[i,1])^2+
-                                          (object$coords[,2]-grp[i,2])^2)))
+  if (object$scale_to_km) {
+    if (list_mode) {
+      grp <- lapply(grp, function(g) g / 1000)
+    } else {
+      grp <- grp / 1000
+    }
   }
+
+  if (object$family == "gaussian") {
+    if (list_mode) {
+      U_pred <- lapply(grp, function(g) {
+        t(sapply(1:nrow(g), function(i) {
+          sqrt((object$coords[object$ID_coords, 1] - g[i, 1])^2 +
+                 (object$coords[object$ID_coords, 2] - g[i, 2])^2)
+        }))
+      })
+    } else {
+      U_pred <- t(sapply(1:n_pred, function(i) {
+        sqrt((object$coords[object$ID_coords, 1] - grp[i, 1])^2 +
+               (object$coords[object$ID_coords, 2] - grp[i, 2])^2)
+      }))
+    }
+
+  } else if (object$family != "gaussian" && !obs_loc) {
+    if (list_mode) {
+      U_pred <- lapply(grp, function(g) {
+        t(sapply(1:nrow(g), function(i) {
+          sqrt((object$coords[, 1] - g[i, 1])^2 +
+                 (object$coords[, 2] - g[i, 2])^2)
+        }))
+      })
+    } else {
+      U_pred <- t(sapply(1:n_pred, function(i) {
+        sqrt((object$coords[, 1] - grp[i, 1])^2 +
+               (object$coords[, 2] - grp[i, 2])^2)
+      }))
+    }
+  }
+
 
   U <- dist(object$coords)
-  if(!obs_loc) {
-
-    C <- par_hat$sigma2*matern_cor(U_pred, phi = par_hat$phi,
-                                   kappa = object$kappa)
+  if (!obs_loc) {
+    if (list_mode) {
+      C <- lapply(U_pred, function(U) {
+        par_hat$sigma2 * matern_cor(U, phi = par_hat$phi, kappa = object$kappa)
+      })
+    } else {
+      C <- par_hat$sigma2 * matern_cor(U_pred, phi = par_hat$phi, kappa = object$kappa)
+    }
   }
-  mu <- as.numeric(object$D%*%par_hat$beta)
+
+  mu <- as.numeric(object$D %*% par_hat$beta)
+
 
   if(control_sim$linear_model) {
     n_samples <- control_sim$n_sim
@@ -253,42 +397,67 @@ pred_over_grid <- function(object,
   if(object$family!="gaussian") {
 
     Sigma <- par_hat$sigma2*R
-    if(!obs_loc) {
+    if (!obs_loc) {
       Sigma_inv <- solve(Sigma)
-      A <- C%*%Sigma_inv
-    }
+      if (list_mode) {
+        A <- lapply(C, function(C_i) C_i %*% Sigma_inv)
+      } else {
+        A <- C %*% Sigma_inv
+      }
+      if(dast_model) {
+        alpha <- par_hat$alpha
+        if(is.null(alpha)) alpha <- object$fix_alpha
 
+        gamma <- par_hat$gamma
 
-    if(dast_model) {
-      alpha <- par_hat$alpha
-      if(is.null(alpha)) alpha <- object$fix_alpha
+        mda_effect <- compute_mda_effect(object$survey_times_data, object$mda_times,
+                                         object$int_mat,
+                                         alpha, gamma, kappa = object$power_val)
+        simulation <-
+          Laplace_sampling_MCMC_dast(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
+                                     sigma2_re = par_hat$sigma2_re,
+                                     mda_effect = mda_effect,
+                                     ID_coords = object$ID_coords, ID_re = object$ID_re,
+                                     control_mcmc = control_sim,
+                                     messages = messages)
+      } else {
+        simulation <-
+          Laplace_sampling_MCMC(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
+                                sigma2_re = par_hat$sigma2_re,
+                                ID_coords = object$ID_coords, ID_re = object$ID_re,
+                                family = object$family, control_mcmc = control_sim,
+                                messages = messages)
+      }
 
-      gamma <- par_hat$gamma
+      if (list_mode) {
+        mu_cond_S <- lapply(seq_along(A), function(i) {
+          A[[i]] %*% t(simulation$samples$S)
+        })
+      } else {
+        mu_cond_S <- A %*% t(simulation$samples$S)
+      }
 
-      mda_effect <- compute_mda_effect(object$survey_times_data, object$mda_times,
-                                        object$int_mat,
-                                        alpha, gamma, kappa = object$power_val)
-      simulation <-
-        Laplace_sampling_MCMC_dast(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
-                              sigma2_re = par_hat$sigma2_re,
-                              mda_effect = mda_effect,
-                              ID_coords = object$ID_coords, ID_re = object$ID_re,
-                              control_mcmc = control_sim,
-                              messages = messages)
-    } else {
-      simulation <-
-        Laplace_sampling_MCMC(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
-                              sigma2_re = par_hat$sigma2_re,
-                              ID_coords = object$ID_coords, ID_re = object$ID_re,
-                              family = object$family, control_mcmc = control_sim,
-                              messages = messages)
-    }
-
-    if(!obs_loc) {
-      mu_cond_S <- A%*%t(simulation$samples$S)
     } else {
       out$S_samples <- t(simulation$samples$S)
     }
+
+
+
+    if (!obs_loc) {
+      Sigma_inv <- solve(Sigma)
+      if (list_mode) {
+        A <- lapply(C, function(C_i) C_i %*% Sigma_inv)
+        mu_cond_S <- lapply(seq_along(A), function(i) {
+          A[[i]] %*% t(simulation$samples$S)
+        })
+      } else {
+        A <- C %*% Sigma_inv
+        mu_cond_S <- A %*% t(simulation$samples$S)
+      }
+    } else {
+      out$S_samples <- t(simulation$samples$S)
+    }
+
     if(type=="marginal") {
       if(!obs_loc) {
         sd_cond_S <- sqrt(par_hat$sigma2-diag(A%*%t(C)))
@@ -298,17 +467,41 @@ pred_over_grid <- function(object,
                                   sd_cond_S*rnorm(n_pred))
       }
     } else {
-      if(!obs_loc) {
-        U_pred_o <- dist(grp)
-        Sigma_pred <-  par_hat$sigma2*matern_cor(U_pred_o, phi = par_hat$phi,
-                                                 kappa = object$kappa,
-                                                 return_sym_matrix = TRUE)
-        Sigma_cond <- Sigma_pred - A%*%t(C)
-        Sigma_cond_sroot <- t(chol(Sigma_cond))
-        out$S_samples <- sapply(1:n_samples,
-                                function(i)
-                                  mu_cond_S[,i]+
-                                  Sigma_cond_sroot%*%rnorm(n_pred))
+      if (!obs_loc) {
+        Sigma_inv <- solve(Sigma)
+        if (list_mode) {
+          A <- lapply(C, function(C_i) C_i %*% Sigma_inv)
+          mu_cond_S <- lapply(seq_along(A), function(i) {
+            A[[i]] %*% t(simulation$samples$S)
+          })
+
+          out$S_samples <- lapply(seq_along(mu_cond_S), function(i) {
+            U_pred_o <- dist(grp[[i]])
+            Sigma_pred <- par_hat$sigma2 * matern_cor(U_pred_o, phi = par_hat$phi,
+                                                      kappa = object$kappa,
+                                                      return_sym_matrix = TRUE)
+            Sigma_cond <- Sigma_pred - A[[i]] %*% t(C[[i]])
+            Sigma_cond_sroot <- t(chol(Sigma_cond))
+            sapply(1:n_samples, function(j) {
+              mu_cond_S[[i]][, j] + Sigma_cond_sroot %*% rnorm(nrow(mu_cond_S[[i]]))
+            })
+          })
+        } else {
+          A <- C %*% Sigma_inv
+          mu_cond_S <- A %*% t(simulation$samples$S)
+
+          U_pred_o <- dist(grp)
+          Sigma_pred <- par_hat$sigma2 * matern_cor(U_pred_o, phi = par_hat$phi,
+                                                    kappa = object$kappa,
+                                                    return_sym_matrix = TRUE)
+          Sigma_cond <- Sigma_pred - A %*% t(C)
+          Sigma_cond_sroot <- t(chol(Sigma_cond))
+          out$S_samples <- sapply(1:n_samples, function(i) {
+            mu_cond_S[, i] + Sigma_cond_sroot %*% rnorm(nrow(mu_cond_S))
+          })
+        }
+      } else {
+        out$S_samples <- t(simulation$samples$S)
       }
     }
   } else {
@@ -396,6 +589,7 @@ pred_over_grid <- function(object,
     }
   }
 
+
   if(n_re>0 & !is.null(re_predictors)) {
     out$re <- list()
     out$re$D_pred <- D_re_pred
@@ -471,6 +665,8 @@ pred_over_grid <- function(object,
   class(out) <- "RiskMap.pred.re"
   return(out)
 }
+
+
 
 ##' @title Predictive Target Over a Regular Spatial Grid
 ##'
@@ -764,8 +960,76 @@ pred_target_shp <- function(object, shp, shp_target=mean,
     }
   }
 
+  list_mode <- is.list(object$grid_pred)
 
-  n_pred <- nrow(object$S_samples)
+  if (list_mode) {
+    # Basic validation of list contents (sf/sfc POINTs)
+    ok_geom <- vapply(
+      object$grid_pred,
+      function(g) {
+        inherits(g, "sf") || inherits(g, "sfc")
+      },
+      logical(1)
+    )
+    if (!all(ok_geom)) {
+      stop("When 'object$grid_pred' is a list, each element must be an 'sf' or 'sfc' object.")
+    }
+
+    # number of locations per group
+    n_pred <- vapply(object$grid_pred, function(g) nrow(sf::st_coordinates(g)), integer(1))
+
+    # weights must be a list with per-group numeric vectors of matching length
+    if (!is.null(weights)) {
+      if (!is.list(weights)) {
+        stop("When 'object$grid_pred' is a list, 'weights' must also be a list, ",
+             "with one numeric vector per element of 'object$grid_pred'.")
+      }
+      if (length(weights) != length(object$grid_pred)) {
+        stop("Length of 'weights' must match length of 'object$grid_pred'.")
+      }
+      for (i in seq_along(weights)) {
+        if (!is.numeric(weights[[i]])) {
+          stop(sprintf("'weights[[%d]]' must be numeric.", i))
+        }
+        if (length(weights[[i]]) != n_pred[i]) {
+          stop(sprintf("Length of 'weights[[%d]]' (%d) must equal number of locations in 'object$grid_pred[[%d]]' (%d).",
+                       i, length(weights[[i]]), i, n_pred[i]))
+        }
+        if (anyNA(weights[[i]])) {
+          warning(sprintf("NA values found in 'weights[[%d]]'; they will be treated as 0.", i))
+          weights[[i]][is.na(weights[[i]])] <- 0
+        }
+      }
+      no_weights <- FALSE
+    } else {
+      # if omitted, create per-group vectors of 1s (keeps downstream logic simple later)
+      weights <- lapply(n_pred, function(n) rep(1, n))
+      no_weights <- TRUE
+    }
+
+    # If DAST and including MDA effect, mda_grid must be a list with rows per location
+    if (dast_model && include_mda_effect) {
+      if (is.null(mda_grid)) {
+        stop("With DAST and include_mda_effect = TRUE, 'mda_grid' must be provided (as a list matching 'object$grid_pred').")
+      }
+      if (!is.list(mda_grid)) {
+        stop("When 'object$grid_pred' is a list, 'mda_grid' must also be a list (one element per group).")
+      }
+      if (length(mda_grid) != length(object$grid_pred)) {
+        stop("Length of 'mda_grid' must match length of 'object$grid_pred'.")
+      }
+      for (i in seq_along(mda_grid)) {
+        if (!is.matrix(mda_grid[[i]]) && !is.data.frame(mda_grid[[i]])) {
+          stop(sprintf("'mda_grid[[%d]]' must be a matrix or data.frame.", i))
+        }
+        if (nrow(mda_grid[[i]]) != n_pred[i]) {
+          stop(sprintf("Rows of 'mda_grid[[%d]]' (%d) must equal number of locations in 'object$grid_pred[[%d]]' (%d).",
+                       i, nrow(mda_grid[[i]]), i, n_pred[i]))
+        }
+      }
+    }
+  }
+
 
   n_re <- length(object$re$samples)
   re_names <- names(object$re$samples)
@@ -777,17 +1041,13 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   }
 
   if(!is.null(weights)) {
-    if(!inherits(weights,
-                 what = c("numeric"), which = FALSE)) {
-      stop("The object passed to 'weights' must be a numeric
-         vector of weights with length equal to the number of
-           prediction locations")
-    }
-    if(length(weights)!=n_pred) stop("The value passed to 'weights' do not match
-                                   the prediction grid")
     no_weights <- FALSE
   } else {
-    weights <- rep(1,n_pred)
+    if(list_mode) {
+      weights <- sapply(unlist(n_pred), function(i) rep(1, i))
+    } else {
+      weights <- rep(1,n_pred)
+    }
     no_weights <- TRUE
   }
 
@@ -807,13 +1067,18 @@ pred_target_shp <- function(object, shp, shp_target=mean,
 
   n_summaries <- length(pd_summary)
   n_f <- length(f_target)
-  n_samples <- ncol(object$S_samples)
+  if(list_mode) {
+    n_samples <- ncol(object$S_samples[[1]])
+  } else {
+    n_samples <- ncol(object$S_samples)
+  }
 
-  if(length(object$mu_pred)==1 && object$mu_pred==0 &&
-     include_covariates) {
+  if(!list_mode & (length(object$mu_pred)==1 && object$mu_pred==0 &&
+     include_covariates)) {
     stop("Covariates have not been provided; re-run pred_over_grid
          and provide the covariates through the argument 'predictors'")
   }
+
   if(!include_covariates) {
     mu_target <- 0
   } else {
@@ -825,7 +1090,11 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   }
 
   if(!include_cov_offset) {
-    cov_offset <- 0
+    if(list_mode) {
+      cov_offset <- sapply(unlist(n_pred), function(i) rep(0, i))
+    } else {
+      cov_offset <- 0
+    }
   } else {
     if(length(object$cov_offset)==1) {
       stop("No covariate offset was included in the model;
@@ -843,17 +1112,43 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   }
 
   out <- list()
-  if(is.matrix(mu_target)) {
-    out$lp_samples <- sapply(1:n_samples,
-                             function(i)
-                               mu_target[,i] + cov_offset +
-                               object$S_samples[,i])
+  if(list_mode) {
+    # Convert vectors to matrices with 1 row (assumes each is length n_samples)
+    object$S_samples <- lapply(object$S_samples, function(x) {
+      if (is.numeric(x) && is.vector(x)) {
+        matrix(x, nrow = 1)
+      } else {
+        x
+      }
+    })
+
+    if(is.matrix(mu_target[[1]])) {
+      out$lp_samples <- sapply(1:length(object$grid_pred), function(j)
+                               sapply(1:n_samples,
+                               function(i)
+                                 mu_target[[j]][,i] + cov_offset[[j]] +
+                                 object$S_samples[[j]][,i]))
+    } else {
+      out$lp_samples <- sapply(1:length(object$grid_pred), function(j)
+                               sapply(1:n_samples,
+                                      function(i)
+                                      mu_target[[j]] + cov_offset[[j]] +
+                                      object$S_samples[[j]][,i]))
+    }
   } else {
-    out$lp_samples <- sapply(1:n_samples,
-                             function(i)
-                               mu_target + cov_offset +
-                               object$S_samples[,i])
+    if(is.matrix(mu_target)) {
+      out$lp_samples <- sapply(1:n_samples,
+                               function(i)
+                                 mu_target[,i] + cov_offset +
+                                 object$S_samples[,i])
+    } else {
+      out$lp_samples <- sapply(1:n_samples,
+                               function(i)
+                                 mu_target + cov_offset +
+                                 object$S_samples[,i])
+    }
   }
+
   if(include_re) {
     n_dim_re <- sapply(1:n_re, function(i) length(object$re$samples[[i]]))
 
@@ -884,36 +1179,45 @@ pred_target_shp <- function(object, shp, shp_target=mean,
     }
   }
 
-  shp <- st_transform(shp, crs = st_crs(object$grid_pred)$input)
-  inter <- st_intersects(shp, object$grid_pred)
-
-  if(any(is.na(weights))) {
-    warning("Missing values found in 'weights' are set to 0 \n")
-    weights[is.na(weights)] <- 0
+  if(list_mode) {
+    shp <- st_transform(shp, crs = st_crs(object$grid_pred[[1]])$input)
+  } else {
+    shp <- st_transform(shp, crs = st_crs(object$grid_pred)$input)
   }
+  if(!list_mode) {
+    inter <- st_intersects(shp, object$grid_pred)
+    if(any(is.na(weights))) {
+      warning("Missing values found in 'weights' are set to 0 \n")
+      weights[is.na(weights)] <- 0
+    }
+  } else {
+    for(i in 1:length(object$grid_pred)) {
+      if(any(is.na(weights[[i]]))) {
+        warning("Missing values found in 'weights' are set to 0 \n")
+        weights[[i]][is.na(weights[[i]])] <- 0
+      }
+    }
+  }
+
   no_comp <- NULL
   for(h in 1:n_reg) {
-    if(messages) message("Computing predictive target for:",shp[[col_names]][h])
-    if(length(inter[[h]])==0) {
-      warning(paste("No points on the grid fall within", shp[[col_names]][h],
-                    "and no predictions are carried out for this area"))
-      no_comp <- c(no_comp, h)
-    } else {
-      ind_grid_h <- inter[[h]]
+
+    if(list_mode) {
+      if(messages) message("Computing predictive target for: ",shp[[col_names]][h])
       if(standardize_weights & !no_weights) {
-        weights_h <- weights[ind_grid_h]/sum(weights[ind_grid_h])
+        weights_h <- weights[[h]]/sum(weights[[h]])
       } else {
-        weights_h <- weights[ind_grid_h]
+        weights_h <- weights[[h]]
       }
       for(i in 1:n_f) {
-        target_grid_samples_i <- as.matrix(f_target[[i]](out$lp_samples[ind_grid_h,]))
+        target_grid_samples_i <- as.matrix(f_target[[i]](out$lp_samples[[h]]))
         if(dast_model && include_mda_effect) {
           alpha <- object$par_hat$alpha
           if(is.null(alpha)) alpha <- object$fix_alpha
           gamma <- object$par_hat$gamma
-          mda_effect_time_pred <- compute_mda_effect(rep(time_pred, length(ind_grid_h)),
+          mda_effect_time_pred <- compute_mda_effect(rep(time_pred, n_pred[h]),
                                                      mda_times = object$mda_times,
-                                                     mda_grid[ind_grid_h,], alpha = alpha,
+                                                     int = mda_grid[[h]], alpha = alpha,
                                                      gamma = gamma, kappa = object$power_val)
           target_grid_samples_i <- target_grid_samples_i*mda_effect_time_pred
 
@@ -929,8 +1233,47 @@ pred_target_shp <- function(object, shp, shp_target=mean,
             pd_summary[[j]](target_samples_i)
         }
       }
+      if(messages) message(" \n")
+    } else {
+      if(messages) message("Computing predictive target for:",shp[[col_names]][h])
+      if(length(inter[[h]])==0) {
+        warning(paste("No points on the grid fall within", shp[[col_names]][h],
+                      "and no predictions are carried out for this area"))
+        no_comp <- c(no_comp, h)
+      } else {
+        ind_grid_h <- inter[[h]]
+        if(standardize_weights & !no_weights) {
+          weights_h <- weights[ind_grid_h]/sum(weights[ind_grid_h])
+        } else {
+          weights_h <- weights[ind_grid_h]
+        }
+        for(i in 1:n_f) {
+          target_grid_samples_i <- as.matrix(f_target[[i]](out$lp_samples[ind_grid_h,]))
+          if(dast_model && include_mda_effect) {
+            alpha <- object$par_hat$alpha
+            if(is.null(alpha)) alpha <- object$fix_alpha
+            gamma <- object$par_hat$gamma
+            mda_effect_time_pred <- compute_mda_effect(rep(time_pred, length(ind_grid_h)),
+                                                       mda_times = object$mda_times,
+                                                       mda_grid[ind_grid_h,], alpha = alpha,
+                                                       gamma = gamma, kappa = object$power_val)
+            target_grid_samples_i <- target_grid_samples_i*mda_effect_time_pred
+
+          }
+
+          target_samples_i <-
+            apply(target_grid_samples_i,
+                  2, function(x) shp_target(weights_h*x))
+
+          out$target[[paste(names_reg[h])]][[paste(names_f[i])]] <- list()
+          for(j in 1:n_summaries) {
+            out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]] <-
+              pd_summary[[j]](target_samples_i)
+          }
+        }
+      }
+      if(messages) message(" \n")
     }
-    if(messages) message(" \n")
   }
 
   if(return_shp) {
@@ -1211,6 +1554,15 @@ assess_pp <- function(object,
   if (method == "cluster") {
     data_split <- spatial_clustering_cv(data = data_sf,
                                         v = fold, repeats = iter, ...)
+    all_ids <- seq_len(nrow(data_sf))
+
+    for (i in seq_along(data_split$splits)) {
+      if (is.null(data_split$splits[[i]]$out_id) || all(is.na(data_split$splits[[i]]$out_id))) {
+        in_id <- data_split$splits[[i]]$in_id
+        data_split$splits[[i]]$out_id <- setdiff(all_ids, in_id)
+      }
+    }
+
   } else {                                            # regularised distance split
     data_split <- list(splits = vector("list", iter))
     for (i in seq_len(iter)) {
@@ -1339,7 +1691,7 @@ assess_pp <- function(object,
       } else {
         sigma2_me <- refit_i$fix_var_me
       }
-      eta_samp <- eta_samp + sqrt(sigma2_me)*rnorm(length(eta_samp))
+      if(refit_i$family=="gaussian") eta_samp <- eta_samp + sqrt(sigma2_me)*rnorm(length(eta_samp))
 
 
       mu_samp  <- linkfun(eta_samp)                   # on response scale
