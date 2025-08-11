@@ -56,9 +56,14 @@ unstructured random effects into the predictive target.</p>
 <span>  include_covariates <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  include_nugget <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  include_cov_offset <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  include_mda_effect <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  return_shp <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  time_pred <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  mda_grid <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  include_re <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  f_target <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  pd_summary <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  pd_summary <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  messages <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -100,6 +105,14 @@ unstructured random effects into the predictive target.</p>
 
 <dt id="arg-include-cov-offset">include_cov_offset<a class="anchor" aria-label="anchor" href="#arg-include-cov-offset"></a></dt>
 <dd><p>Logical indicating whether to include covariate offset in predictions (default is FALSE).</p></dd>
+
+
+<dt id="arg-include-mda-effect">include_mda_effect<a class="anchor" aria-label="anchor" href="#arg-include-mda-effect"></a></dt>
+<dd><p>Logical indicating whether to include the mass drug administration (MDA) effect as defined by the fitted DAST model (default is TRUE).</p></dd>
+
+
+<dt id="arg-return-shp">return_shp<a class="anchor" aria-label="anchor" href="#arg-return-shp"></a></dt>
+<dd><p>Logical indicating whether to return the shape file with the added predictive distribution summaries as defined through <code>pd_summary</code>.</p></dd>
 
 
 <dt id="arg-include-re">include_re<a class="anchor" aria-label="anchor" href="#arg-include-re"></a></dt>

@@ -43,6 +43,7 @@ based on a fitted decay-adjusted spatio-temporal (DAST) model.</p>
     <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">plot_mda</span><span class="op">(</span></span>
 <span>  <span class="va">object</span>,</span>
 <span>  n_sim <span class="op">=</span> <span class="fl">10000</span>,</span>
+<span>  x_min <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  x_max <span class="op">=</span> <span class="fl">10</span>,</span>
 <span>  conf_level <span class="op">=</span> <span class="fl">0.95</span>,</span>
 <span>  lower_f <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -61,6 +62,10 @@ based on a fitted decay-adjusted spatio-temporal (DAST) model.</p>
 
 <dt id="arg-n-sim">n_sim<a class="anchor" aria-label="anchor" href="#arg-n-sim"></a></dt>
 <dd><p>Number of posterior samples to simulate (default: 10000).</p></dd>
+
+
+<dt id="arg-x-min">x_min<a class="anchor" aria-label="anchor" href="#arg-x-min"></a></dt>
+<dd><p>Minimum value for the x-axis (default: 1 year).</p></dd>
 
 
 <dt id="arg-x-max">x_max<a class="anchor" aria-label="anchor" href="#arg-x-max"></a></dt>

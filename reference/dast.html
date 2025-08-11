@@ -47,10 +47,10 @@ to the impact of mass drug administration (MDA). The function requires the full 
 <span>  <span class="va">formula</span>,</span>
 <span>  <span class="va">data</span>,</span>
 <span>  den <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  <span class="va">survey_times</span>,</span>
 <span>  <span class="va">mda_times</span>,</span>
 <span>  <span class="va">int_mat</span>,</span>
 <span>  penalty <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  sst <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  drop <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  <span class="va">power_val</span>,</span>
 <span>  crs <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -61,8 +61,8 @@ to the impact of mass drug administration (MDA). The function requires the full 
 <span>  S_samples <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  return_samples <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  messages <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  start_pars <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>beta <span class="op">=</span> <span class="cn">NULL</span>, sigma2 <span class="op">=</span> <span class="cn">NULL</span>, tau2 <span class="op">=</span> <span class="cn">NULL</span>, phi <span class="op">=</span> <span class="cn">NULL</span>, sigma2_re <span class="op">=</span></span>
-<span>    <span class="cn">NULL</span>, gamma <span class="op">=</span> <span class="cn">NULL</span>, alpha <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span></span>
+<span>  start_pars <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>beta <span class="op">=</span> <span class="cn">NULL</span>, sigma2 <span class="op">=</span> <span class="cn">NULL</span>, tau2 <span class="op">=</span> <span class="cn">NULL</span>, phi <span class="op">=</span> <span class="cn">NULL</span>, psi <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>    sigma2_re <span class="op">=</span> <span class="cn">NULL</span>, gamma <span class="op">=</span> <span class="cn">NULL</span>, alpha <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -80,10 +80,6 @@ to the impact of mass drug administration (MDA). The function requires the full 
 
 <dt id="arg-den">den<a class="anchor" aria-label="anchor" href="#arg-den"></a></dt>
 <dd><p>The denominator for binomial models.</p></dd>
-
-
-<dt id="arg-survey-times">survey_times<a class="anchor" aria-label="anchor" href="#arg-survey-times"></a></dt>
-<dd><p>The variable indicating the survey times.</p></dd>
 
 
 <dt id="arg-mda-times">mda_times<a class="anchor" aria-label="anchor" href="#arg-mda-times"></a></dt>
@@ -141,6 +137,10 @@ must be <code>n * n_mda</code>, where <code>n</code> is the number of rows of <c
 
 <dt id="arg-start-pars">start_pars<a class="anchor" aria-label="anchor" href="#arg-start-pars"></a></dt>
 <dd><p>List of starting values for parameters.</p></dd>
+
+
+<dt id="arg-survey-times">survey_times<a class="anchor" aria-label="anchor" href="#arg-survey-times"></a></dt>
+<dd><p>The variable indicating the survey times.</p></dd>
 
 </dl></div>
     <div class="section level2">
