@@ -8,10 +8,10 @@ dast(
   formula,
   data,
   den = NULL,
-  survey_times,
   mda_times,
   int_mat,
   penalty = NULL,
+  sst = FALSE,
   drop = NULL,
   power_val,
   crs = NULL,
@@ -22,8 +22,8 @@ dast(
   S_samples = NULL,
   return_samples = TRUE,
   messages = TRUE,
-  start_pars = list(beta = NULL, sigma2 = NULL, tau2 = NULL, phi = NULL, sigma2_re =
-    NULL, gamma = NULL, alpha = NULL)
+  start_pars = list(beta = NULL, sigma2 = NULL, tau2 = NULL, phi = NULL, psi = NULL,
+    sigma2_re = NULL, gamma = NULL, alpha = NULL)
 )
 }
 \arguments{
@@ -32,8 +32,6 @@ dast(
 \item{data}{A `data.frame` or `sf` object containing the dataset.}
 
 \item{den}{The denominator for binomial models.}
-
-\item{survey_times}{The variable indicating the survey times.}
 
 \item{mda_times}{A vector specifying the mass drug administration (MDA) times.}
 
@@ -63,6 +61,8 @@ must be \code{n * n_mda}, where \code{n} is the number of rows of \code{data} an
 \item{messages}{Logical; whether to print messages (default: `TRUE`).}
 
 \item{start_pars}{List of starting values for parameters.}
+
+\item{survey_times}{The variable indicating the survey times.}
 }
 \value{
 A list containing model estimates, posterior samples, and metadata.

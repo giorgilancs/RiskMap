@@ -2,7 +2,7 @@
 % Please edit documentation in R/spatial_prediction.R
 \name{assess_pp}
 \alias{assess_pp}
-\title{Compute scoring rules using spatial cross-validation}
+\title{Assess Predictive Performance via Spatial Cross-Validation}
 \usage{
 assess_pp(
   object,
@@ -43,29 +43,36 @@ subset of locations.}
 
 \item{messages}{Logical; if `TRUE`, displays progress messages.}
 
-\item{which_metric}{Character; either `"CRPS"` or `"SCRPS"` to specify the scoring rule.}
+\item{which_metric}{Character vector; one or more of `"CRPS"`, `"SCRPS"`, or `"AnPIT"`, to specify the predictive performance metrics to compute.}
 
 \item{...}{Additional arguments passed to clustering or subsampling functions.}
 }
 \value{
 A list of class `RiskMap.spatial.cv`, containing:
-  - `test_set`: A list containing all the test sets used for the validation in
-  'sf' class.
-  - `score`: A list with either `CRPS` or `SCRPS` scores for each fold, depending on `which_metric`.
-  - `refit`: A list of re-fitted models for each fold if `keep_par_fixed = FALSE`.
+\describe{
+  \item{test_set}{A list of test sets used for validation, each of class `'sf'`.}
+  \item{model}{A named list, one per model, each containing:
+    \describe{
+      \item{score}{A list with CRPS and/or SCRPS scores for each fold if requested.}
+      \item{PIT}{(if `family = "gaussian"` and `which_metric` includes `"AnPIT"`) A list of PIT values for test data.}
+      \item{AnPIT}{(if `family` is discrete and `which_metric` includes `"AnPIT"`) A list of AnPIT curves for test data.}
+    }
+  }
+}
 }
 \description{
-This function calculates the predictive accuracy of a spatial model fitted to a `RiskMap` object using cross-validation.
-It allows model scoring based on specified metrics, with options for two cross-validation methods: spatial clustering and regularized subsampling.
-Users can choose between continuous ranked probability score (CRPS) and scaled CRPS (SCRPS) as scoring metrics to evaluate predictive quality.
-For each data fold, the function can either refit the model or use fixed parameters, enabling flexible model validation and evaluation.
-Additionally, it can generate plots of test sets across folds, providing visual insights into the spatial cross-validation structure.
+This function evaluates the predictive performance of spatial models fitted to `RiskMap` objects using cross-validation. It supports two classes of diagnostic tools:
+
+- **Scoring rules**, including the Continuous Ranked Probability Score (CRPS) and its scaled version (SCRPS), which quantify the sharpness and calibration of probabilistic forecasts;
+- **Calibration diagnostics**, based on the Probability Integral Transform (PIT) for Gaussian outcomes and Aggregated nonparametric PIT (AnPIT) curves for discrete outcomes (e.g., Poisson or Binomial).
+
+Cross-validation can be performed using either spatial clustering or regularized subsampling with a minimum inter-point distance. For each fold or subset, models can be refitted or evaluated with fixed parameters, offering flexibility in model validation. The function also provides visualizations of the spatial distribution of test folds.
 }
 \references{
 Bolin, D., & Wallin, J. (2023). Local scale invariance and robustness of proper scoring rules. *Statistical Science*, 38(1), 140–159. \doi{10.1214/22-STS864}.
 }
 \seealso{
-\code{\link{spatial_clustering_cv}}, \code{\link{subsample.distance}}
+\code{\link{spatial_clustering_cv}}, \code{\link{subsample.distance}}, \code{\link{plot_AnPIT}}
 }
 \author{
 Emanuele Giorgi

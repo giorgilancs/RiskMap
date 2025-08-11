@@ -6,7 +6,7 @@
 \usage{
 pred_over_grid(
   object,
-  grid_pred,
+  grid_pred = NULL,
   predictors = NULL,
   re_predictors = NULL,
   pred_cov_offset = NULL,

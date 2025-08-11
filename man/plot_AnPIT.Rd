@@ -2,7 +2,7 @@
 % Please edit documentation in R/auxiliary.R
 \name{plot_AnPIT}
 \alias{plot_AnPIT}
-\title{Plot AnPIT Results from Model Validation}
+\title{Plot Calibration Curves (AnPIT / PIT) from Spatial Cross-Validation}
 \usage{
 plot_AnPIT(
   object,
@@ -13,20 +13,33 @@ plot_AnPIT(
 )
 }
 \arguments{
-\item{object}{A `RiskMap.spatial.cv` object containing validation results.}
+\item{object}{A \code{RiskMap.spatial.cv} object.}
 
-\item{mode}{Character string specifying the mode of plotting: `"average"` (average AnPIT across test sets),
-`"single"` (AnPIT for a specific test set), or `"all"` (all test sets).}
+\item{mode}{One of \code{"average"} (average curve across test sets),
+\code{"single"} (a specific test set),
+or \code{"all"} (every test set separately).}
 
-\item{test_set}{Integer specifying the test set to plot when `mode = "single"`.}
+\item{test_set}{Integer; required when \code{mode = "single"}.}
 
-\item{model_name}{Character string specifying the name of the model to plot. If `NULL`, all models are plotted.}
+\item{model_name}{Optional character string; if supplied,
+only that model is plotted.}
 
-\item{combine_panels}{Logical specifying whether to combine all models into a single plot when `mode = "average"`. Defaults to `FALSE`.}
+\item{combine_panels}{Logical; when \code{mode = "average"}, draw
+all models in a single panel (\code{TRUE})
+or one panel per model (\code{FALSE}, default).}
 }
 \value{
-A ggplot2 plot or a grid of plots.
+A \pkg{ggplot2} object (single plot) or a \pkg{ggpubr} grid.
 }
 \description{
-This function plots AnPIT results from a `RiskMap.spatial.cv` object obtained using the `assess_pp` function.
+Produce calibration plots from a \code{RiskMap.spatial.cv} object returned by
+\code{\link{assess_pp}}.
+* For Binomial or Poisson models the function visualises the
+  \emph{Aggregated normalised Probability Integral Transform} (AnPIT)
+  curves stored in \code{$AnPIT}.
+* For Gaussian models it detects the list \code{$PIT} and instead plots
+  the empirical \emph{Probability Integral Transform} curve
+  (ECDF of PIT values) on the same \eqn{u}-grid.
+
+A 45° dashed red line indicates perfect calibration.
 }

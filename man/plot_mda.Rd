@@ -7,6 +7,7 @@
 plot_mda(
   object,
   n_sim = 10000,
+  x_min = 1,
   x_max = 10,
   conf_level = 0.95,
   lower_f = NULL,
@@ -18,6 +19,8 @@ plot_mda(
 \item{object}{A fitted DAST model object, obtained as an output from the function \code{\link{dast}}.}
 
 \item{n_sim}{Number of posterior samples to simulate (default: 10000).}
+
+\item{x_min}{Minimum value for the x-axis (default: 1 year).}
 
 \item{x_max}{Maximum value for the x-axis (default: 10 years).}
 

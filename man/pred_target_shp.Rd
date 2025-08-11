@@ -14,9 +14,14 @@ pred_target_shp(
   include_covariates = TRUE,
   include_nugget = FALSE,
   include_cov_offset = FALSE,
+  include_mda_effect = TRUE,
+  return_shp = TRUE,
+  time_pred = NULL,
+  mda_grid = NULL,
   include_re = FALSE,
   f_target = NULL,
-  pd_summary = NULL
+  pd_summary = NULL,
+  messages = TRUE
 )
 }
 \arguments{
@@ -37,6 +42,10 @@ pred_target_shp(
 \item{include_nugget}{Logical indicating whether to include the nugget effect (default is FALSE).}
 
 \item{include_cov_offset}{Logical indicating whether to include covariate offset in predictions (default is FALSE).}
+
+\item{include_mda_effect}{Logical indicating whether to include the mass drug administration (MDA) effect as defined by the fitted DAST model (default is TRUE).}
+
+\item{return_shp}{Logical indicating whether to return the shape file with the added predictive distribution summaries as defined through \code{pd_summary}.}
 
 \item{include_re}{Logical indicating whether to include random effects in predictions (default is FALSE).}
 

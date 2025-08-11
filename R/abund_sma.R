@@ -1,0 +1,39 @@
+##' @title Female Culex pipiens abundance (collections) in the Sacramento Metropolitan Area
+##'
+##' @description
+##' A dataset of mosquito collection events used to quantify abundance of female
+##' Culex pipiens in the Sacramento Metropolitan Area (Sacramento, Placer, El Dorado
+##' counties, California, USA). Each row represents a single collection event at a
+##' specific location and date.
+##'
+##' @format A data frame with one row per collection event (for a total of 1552 collection events) and 6 variables:
+##' \describe{
+##'   \item{lon}{Numeric. Longitude in decimal degrees (WGS84).}
+##'   \item{lat}{Numeric. Latitude in decimal degrees (WGS84).}
+##'   \item{total_females}{Integer. Total number of female Cx. pipiens captured in the event.}
+##'   \item{date}{Date. Exact collection date (local).}
+##'   \item{trap_nights}{Integer. Number of trap-nights for the event.}
+##'   \item{trap_type}{Character. Acronym for trap type used to collect mosquitoes. These include: \code{"NJLT"} (New Jersey Light Trap), \code{"GRVD"} (Gravid Trap), and \code{"MMT"} (Mosquito Magnet Trap).}
+##' }
+##' @details
+##' Derived from the \pkg{vectorsurvR} sample datasets by:
+##' \enumerate{
+##' \item Filtering to female \emph{Culex pipiens} collection records within the Sacramento
+##' Metropolitan Area (SMA) using point-in-polygon against the union of Sacramento, Placer,
+##' and El Dorado county boundaries.
+##' \item Summing counts and trap-nights per unique \emph{location}–\emph{date}–\emph{trap type}.
+##' \item Coordinates are kept as WGS84 (EPSG:4326).
+##' }
+##'
+##' This sample dataset is intended for examples, mapping, and vector-index workflows. It is
+##' not official surveillance output. Dates span the same period as the \pkg{vectorsurvR}
+##' sample (e.g., 2015–2021).
+##'
+##' @source Constructed from \code{sample_collections} in the \code{vectorsurvR} R package.
+##'
+##'
+##' @docType data
+##' @name abund_sma
+##' @aliases abund_sma
+##' @usage data(abund_sma)
+NULL

@@ -397,38 +397,42 @@ pred_over_grid <- function(object,
   if(object$family!="gaussian") {
 
     Sigma <- par_hat$sigma2*R
-    if (!obs_loc) {
-      Sigma_inv <- solve(Sigma)
+    Sigma_inv <- solve(Sigma)
+
+    if(!obs_loc) {
       if (list_mode) {
         A <- lapply(C, function(C_i) C_i %*% Sigma_inv)
       } else {
         A <- C %*% Sigma_inv
       }
-      if(dast_model) {
-        alpha <- par_hat$alpha
-        if(is.null(alpha)) alpha <- object$fix_alpha
+    }
 
-        gamma <- par_hat$gamma
+    if(dast_model) {
+      alpha <- par_hat$alpha
+      if(is.null(alpha)) alpha <- object$fix_alpha
 
-        mda_effect <- compute_mda_effect(object$survey_times_data, object$mda_times,
-                                         object$int_mat,
-                                         alpha, gamma, kappa = object$power_val)
-        simulation <-
-          Laplace_sampling_MCMC_dast(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
-                                     sigma2_re = par_hat$sigma2_re,
-                                     mda_effect = mda_effect,
-                                     ID_coords = object$ID_coords, ID_re = object$ID_re,
-                                     control_mcmc = control_sim,
-                                     messages = messages)
-      } else {
-        simulation <-
-          Laplace_sampling_MCMC(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
-                                sigma2_re = par_hat$sigma2_re,
-                                ID_coords = object$ID_coords, ID_re = object$ID_re,
-                                family = object$family, control_mcmc = control_sim,
-                                messages = messages)
-      }
+      gamma <- par_hat$gamma
 
+      mda_effect <- compute_mda_effect(object$survey_times_data, object$mda_times,
+                                       object$int_mat,
+                                       alpha, gamma, kappa = object$power_val)
+      simulation <-
+        Laplace_sampling_MCMC_dast(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
+                                   sigma2_re = par_hat$sigma2_re,
+                                   mda_effect = mda_effect,
+                                   ID_coords = object$ID_coords, ID_re = object$ID_re,
+                                   control_mcmc = control_sim,
+                                   messages = messages)
+    } else {
+      simulation <-
+        Laplace_sampling_MCMC(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
+                              sigma2_re = par_hat$sigma2_re,
+                              ID_coords = object$ID_coords, ID_re = object$ID_re,
+                              family = object$family, control_mcmc = control_sim,
+                              messages = messages)
+    }
+
+    if(!obs_loc) {
       if (list_mode) {
         mu_cond_S <- lapply(seq_along(A), function(i) {
           A[[i]] %*% t(simulation$samples$S)
@@ -436,8 +440,9 @@ pred_over_grid <- function(object,
       } else {
         mu_cond_S <- A %*% t(simulation$samples$S)
       }
+    }
 
-    } else {
+    if(obs_loc) {
       out$S_samples <- t(simulation$samples$S)
     }
 
@@ -454,8 +459,6 @@ pred_over_grid <- function(object,
         A <- C %*% Sigma_inv
         mu_cond_S <- A %*% t(simulation$samples$S)
       }
-    } else {
-      out$S_samples <- t(simulation$samples$S)
     }
 
     if(type=="marginal") {
