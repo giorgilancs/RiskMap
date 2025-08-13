@@ -426,7 +426,7 @@ pred_over_grid <- function(object,
     } else {
       simulation <-
         Laplace_sampling_MCMC(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
-                              sigma2_re = par_hat$sigma2_re,
+                              sigma2_re = par_hat$sigma2_re,invlink = object$linkf$inv,
                               ID_coords = object$ID_coords, ID_re = object$ID_re,
                               family = object$family, control_mcmc = control_sim,
                               messages = messages)
