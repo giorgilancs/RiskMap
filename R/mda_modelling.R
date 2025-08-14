@@ -558,6 +558,17 @@ dast <- function(formula,
   if(nong) res$units_m <- units_m
   res$cov_offset <- cov_offset
   res$call <- match.call()
+
+
+  invlink <- NULL
+  if (is.null(invlink)) {
+    inv <- function(eta) stats::plogis(eta)
+    d1  <- function(eta) { p <- inv(eta); p * (1 - p) }
+    d2  <- function(eta) { p <- inv(eta); d <- p * (1 - p); d * (1 - 2 * p) }
+    invlink <- list(inv = inv, d1 = d1, d2 = d2, name = "canonical")
+  }
+  res$linkf <- invlink
+
   return(res)
 }
 
@@ -1459,10 +1470,11 @@ maxim.integrand.dast <- function(y,units_m,mu,Sigma,ID_coords, ID_re = NULL,
 
   return(out)
 }
-
 Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coords, ID_re = NULL,
                                        sigma2_re = NULL, control_mcmc,
                                        Sigma_pd = NULL, mean_pd = NULL, messages = TRUE) {
+
+  `%||%` <- function(a, b) if (!is.null(a)) a else b
 
   # Precompute values that will not change
   Sigma.inv <- solve(Sigma)
@@ -1532,12 +1544,12 @@ Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coo
     if (is.null(mean_pd)) mean_pd <- out_maxim$mode
   }
 
-  n_sim <- control_mcmc$n_sim
+  n_sim  <- control_mcmc$n_sim
   burnin <- control_mcmc$burnin
-  thin <- control_mcmc$thin
-  h <- control_mcmc$h %||% 1.65 / (n_tot^(1 / 6))  # Default value if not provided
-  c1.h <- control_mcmc$c1.h
-  c2.h <- control_mcmc$c2.h
+  thin   <- control_mcmc$thin
+  h      <- control_mcmc$h %||% (1.65 / (n_tot^(1 / 6)))  # Default if not provided
+  c1.h   <- control_mcmc$c1.h
+  c2.h   <- control_mcmc$c2.h
 
   Sigma_pd_sroot <- t(chol(Sigma_pd))
   A <- solve(Sigma_pd_sroot)
@@ -1546,9 +1558,7 @@ Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coo
   Sigma_tot <- if (n_re == 0) Sigma else {
     Sigma_tot <- matrix(0, n_tot, n_tot)
     Sigma_tot[1:n_loc, 1:n_loc] <- Sigma
-    for (i in 1:n_re) {
-      diag(Sigma_tot)[ind_re[[i]]] <- sigma2_re[i]
-    }
+    for (i in 1:n_re) diag(Sigma_tot)[ind_re[[i]]] <- sigma2_re[i]
     Sigma_tot
   }
 
@@ -1557,14 +1567,6 @@ Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coo
 
   cond.dens.W <- function(W, S_tot) {
     S <- S_tot[1:n_loc]
-    q.f_S <- as.numeric(t(S) %*% Sigma.inv %*% S)
-
-    q.f_re <- 0
-    if (n_re > 0) {
-      for (i in 1:n_re) {
-        q.f_re <- q.f_re + sum(S_tot[ind_re[[i]]] ^ 2) / sigma2_re[i]
-      }
-    }
 
     eta <- mu + S[ID_coords]
     if (n_re > 0) {
@@ -1573,13 +1575,15 @@ Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coo
       }
     }
 
-    prob_star <- 1 / (1 + exp(-eta))
-    prob <- mda_effect * prob_star
+    prob_star <- stats::plogis(eta)             # in (0,1)
+    prob <- mda_effect * prob_star              # expected in (0,1)
+    eps <- .Machine$double.eps
+    prob <- pmin(pmax(prob, eps), 1 - eps)      # clamp for numerical stability
 
     llik <- sum(y * log(prob) + (units_m - y) * log(1 - prob))
     diff_w <- W - mu_w
 
-    -0.5 * as.numeric(t(diff_w) %*% Sigma_w_inv %*% diff_w) + llik
+    as.numeric(-0.5 * crossprod(diff_w, Sigma_w_inv %*% diff_w) + llik)
   }
 
   lang.grad <- function(W, S_tot) {
@@ -1592,19 +1596,29 @@ Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coo
       }
     }
 
-    prob_star <- 1 / (1 + exp(-eta))
+    prob_star <- stats::plogis(eta)
     prob <- mda_effect * prob_star
+    eps <- .Machine$double.eps
+    prob <- pmin(pmax(prob, eps), 1 - eps)
 
-    d_S <- (y / prob - (units_m - y) / (1 - prob)) * mda_effect * prob_star / (1 + exp(eta))
-    grad_S_tot_r <- rep(NA, n_tot)
-    grad_S_tot_r[1:n_loc] <- as.numeric(sapply(1:n_loc, function(i) sum(d_S[C_S[i,]])))
+    # derivative wrt eta
+    # d/deta prob = mda_effect * prob_star * (1 - prob_star)
+    dprob_deta <- mda_effect * prob_star * (1 - prob_star)
+    d_llik_deta <- (y / prob - (units_m - y) / (1 - prob)) * dprob_deta
+
+    grad_S_tot_r <- rep(NA_real_, n_tot)
+    # contributions to S (size n_loc)
+    grad_S_tot_r[1:n_loc] <- as.numeric(sapply(1:n_loc, function(i) sum(d_llik_deta[C_S[i, ]])))
+
     if (n_re > 0) {
       for (j in 1:n_re) {
-        grad_S_tot_r[ind_re[[j]]] <- as.numeric(-S_tot[ind_re[[j]]] / sigma2_re[[j]] + sapply(1:n_dim_re[[j]], function(x) sum(d_S[C_re[[j]][x,]])))
+        # random effect prior term and likelihood term
+        grad_like_re <- sapply(1:n_dim_re[[j]], function(x) sum(d_llik_deta[C_re[[j]][x, ]]))
+        grad_S_tot_r[ind_re[[j]]] <- as.numeric(-S_tot[ind_re[[j]]] / sigma2_re[[j]] + grad_like_re)
       }
     }
 
-    -Sigma_w_inv %*% (W - mu_w) + t(Sigma_pd_sroot) %*% grad_S_tot_r
+    as.numeric(-Sigma_w_inv %*% (W - mu_w) + t(Sigma_pd_sroot) %*% grad_S_tot_r)
   }
 
   # MCMC loop
@@ -1613,16 +1627,20 @@ Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coo
   mean_curr <- as.numeric(W_curr + (h^2 / 2) * lang.grad(W_curr, S_tot_curr))
   lp_curr <- cond.dens.W(W_curr, S_tot_curr)
 
-  acc <- 0
-  n_samples <- (n_sim - burnin) / thin
-  sim <- matrix(NA, nrow = n_samples, ncol = n_tot)
+  acc <- 0L
+  n_samples <- floor((n_sim - burnin) / thin)
+  sim <- matrix(NA_real_, nrow = n_samples, ncol = n_tot)
 
-  if (messages) message("\n - Conditional simulation (burnin=", burnin, ", thin=", thin, "): \n", sep = "")
+  if (messages) message("\n - Conditional simulation (burnin=", burnin, ", thin=", thin, "):")
+  pb <- NULL
+  if (messages && interactive()) {
+    pb <- utils::txtProgressBar(min = 0, max = n_sim, style = 3)
+    on.exit(try(close(pb), silent = TRUE), add = TRUE)
+  }
 
-  h.vec <- rep(NA, n_sim)
-  acc_prob <- rep(NA, n_sim)
+  h.vec <- rep(NA_real_, n_sim)
+  acc_prob <- rep(NA_real_, n_sim)
 
-  # Parallel MCMC sampling
   for (i in 1:n_sim) {
     W_prop <- mean_curr + h * rnorm(n_tot)
     S_tot_prop <- as.numeric(Sigma_pd_sroot %*% W_prop + mean_pd)
@@ -1635,7 +1653,7 @@ Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coo
     log_prob <- lp_prop + dprop_prop - lp_curr - dprop_curr
 
     if (log(runif(1)) < log_prob) {
-      acc <- acc + 1
+      acc <- acc + 1L
       W_curr <- W_prop
       S_tot_curr <- S_tot_prop
       lp_curr <- lp_prop
@@ -1643,29 +1661,31 @@ Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coo
     }
 
     if (i > burnin && (i - burnin) %% thin == 0) {
-      cnt <- (i - burnin) / thin
+      cnt <- (i - burnin) %/% thin
       sim[cnt, ] <- S_tot_curr
     }
 
     acc_prob[i] <- acc / i
-    h.vec[i] <- max(10e-20, h + c1.h * i^(-c2.h) * (acc / i - 0.57))
+    h <- max(1e-19, h + c1.h * i^(-c2.h) * (acc / i - 0.57))  # actually update h
+    h.vec[i] <- h
 
     if (messages) {
-      progress <- i / n_sim * 100
-      bar_length <- floor(progress / 100 * 50)
-      progress_message <- sprintf("\rProgress: [%-50s] %.2f%%", paste(rep("=", bar_length), collapse = ""), progress)
-      cat(progress_message, file = stderr())
-      flush.console()
+      if (!is.null(pb)) {
+        utils::setTxtProgressBar(pb, i)
+      } else if (i %% max(1, floor(n_sim/20)) == 0) {
+        message(sprintf("   %3d%%", round(100 * i / n_sim)))
+      }
     }
   }
 
-  message("\n")
+  if (!is.null(pb)) close(pb)
+  if (messages) message(" done.\n")
 
-  out_sim <- list(samples = list(S = sim[, 1:n_loc]))
+  out_sim <- list(samples = list(S = sim[, 1:n_loc, drop = FALSE]))
   if (n_re > 0) {
-    re_names <- colnames(ID_re)
+    re_names <- if (!is.null(colnames(ID_re))) colnames(ID_re) else paste0("re", seq_len(n_re))
     for (i in 1:n_re) {
-      out_sim$samples[[re_names[i]]] <- sim[, ind_re[[i]]]
+      out_sim$samples[[re_names[i]]] <- sim[, ind_re[[i]], drop = FALSE]
     }
   }
 
@@ -1675,4 +1695,5 @@ Laplace_sampling_MCMC_dast <- function(y, units_m, mu, mda_effect, Sigma, ID_coo
 
   return(out_sim)
 }
+
 

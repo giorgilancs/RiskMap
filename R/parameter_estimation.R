@@ -1270,11 +1270,6 @@ maxim.integrand <- function(
   }
   n_tot <- n_loc + if (n_re > 0) sum(n_dim_re) else 0L
 
-  # ---------- inverse link handling ----------
-  # Users can pass:
-  #  - NULL → canonical inverse link for the family
-  #  - a function invlink(eta_vec) → vector of means
-  #  - a list: list(inv = ..., d1 = ..., d2 = ...) with synonyms accepted
   make_link_funs <- function(family, invlink, ncheck) {
     have_Deriv <- requireNamespace("Deriv", quietly = TRUE)
     have_numDeriv <- requireNamespace("numDeriv", quietly = TRUE)
@@ -1706,8 +1701,6 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
     as.numeric(-Sigma_w_inv %*% (W - mu_w) + t(Sigma_pd_sroot) %*% grad_S_tot)
   }
 
-
-
   # ---------- MALA tuning ----------
   h      <- control_mcmc$h; if (is.null(h)) h <- 1.65/(n_tot^(1/6))
   burnin <- control_mcmc$burnin
@@ -1720,14 +1713,19 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
   mean_curr <- as.numeric(W_curr + (h^2/2) * lang.grad(W_curr, S_tot_curr))
   lp_curr <- cond.dens.W(W_curr, S_tot_curr)
   acc <- 0L
-  n_samples <- (n_sim - burnin) / thin
+  n_samples <- floor((n_sim - burnin) / thin)   # was: (n_sim - burnin) / thin
   sim <- matrix(NA_real_, nrow = n_samples, ncol = n_tot)
 
-  if (messages) message("\n - Conditional simulation (burnin=", burnin, ", thin=", thin, "):\n")
+  # ---- safe progress output (no stderr, no flush.console) ----
+  if (messages) message("\n - Conditional simulation (burnin=", burnin, ", thin=", thin, "):")
+  pb <- NULL
+  if (messages && interactive()) {
+    pb <- utils::txtProgressBar(min = 0, max = n_sim, style = 3)
+    on.exit(try(close(pb), silent = TRUE), add = TRUE)
+  }
+
   h.vec <- rep(NA_real_, n_sim)
   acc_prob <- rep(NA_real_, n_sim)
-
-  progress_bar_length <- 50L
 
   for (i in seq_len(n_sim)) {
     W_prop <- mean_curr + h * rnorm(n_tot)
@@ -1749,26 +1747,26 @@ Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
     }
 
     if (i > burnin && (i - burnin) %% thin == 0) {
-      cnt <- (i - burnin) / thin
+      cnt <- (i - burnin) %/% thin
       sim[cnt, ] <- S_tot_curr
     }
 
     acc_prob[i] <- acc / i
-    h <- max(10e-20, h + c1.h * i^(-c2.h) * (acc / i - 0.57))
+    h <- max(1e-19, h + c1.h * i^(-c2.h) * (acc / i - 0.57))
     h.vec[i] <- h
 
     if (messages) {
-      progress <- i / n_sim * 100
-      bar_length <- floor(progress / 100 * progress_bar_length)
-      progress_message <- sprintf("\rProgress: [%-50s] %.2f%%",
-                                  paste(rep("=", bar_length), collapse = ""),
-                                  progress)
-      cat(progress_message, file = stderr())
-      flush.console()
+      if (!is.null(pb)) {
+        utils::setTxtProgressBar(pb, i)
+      } else if (i %% max(1, floor(n_sim/20)) == 0) {
+        # non-interactive fallback: update every ~5%
+        message(sprintf("   %3d%%", round(100 * i / n_sim)))
+      }
     }
   }
 
-  if (messages) message("\n")
+  if (!is.null(pb)) close(pb)
+  if (messages) message(" done.\n")
 
   out_sim <- list()
   out_sim$samples <- list()
