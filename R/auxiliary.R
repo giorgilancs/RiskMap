@@ -527,13 +527,13 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
     # Fallback: canonical links by family
     if (identical(object$family, "poisson")) {
       link_name <- "canonical (log)"
-      inv_expr  <- "Inverse link function = exp(eta)"
+      inv_expr  <- "Inverse link function = exp(x)"
     } else if (identical(object$family, "binomial")) {
       link_name <- "canonical (logit)"
-      inv_expr  <- "Inverse link function = 1 / (1 + exp(-eta))"
+      inv_expr  <- "Inverse link function = 1 / (1 + exp(-x))"
     } else if (identical(object$family, "gaussian")) {
       link_name <- "identity"
-      inv_expr  <- "Inverse link function = eta"
+      inv_expr  <- "Inverse link function = x"
     }
   }
 
@@ -720,7 +720,7 @@ summary.RiskMap <- function(object, ..., conf_level = 0.95) {
   res$dast            <- dast_model
   res$kappa           <- object$kappa
   res$log.lik         <- object$log.lik
-  res$cov_offset_used <- !is.null(object$cov_offset)
+  res$cov_offset_used <- !(is.null(object$cov_offset) || all(object$cov_offset==0))
   if (object$family == "gaussian") {
     # fix bug: use length(object$estimate), not res$estimate
     res$aic <- 2 * length(object$estimate) - 2 * res$log.lik
