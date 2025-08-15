@@ -821,12 +821,6 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
   }
 
 
-  compareDerivatives(grad.MC.log.lik,
-                     hess.MC.log.lik,
-                     t0=par0_vec + runif(length(par0_vec),-0.1,0.1))
-
-
-
   start_cov_pars[-(1:2)] <- start_cov_pars[-(1:2)]/start_cov_pars[1]
   start_par <- c(start_beta, log(start_cov_pars))
 
