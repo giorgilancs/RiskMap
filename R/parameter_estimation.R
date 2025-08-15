@@ -669,7 +669,7 @@ glgpm_lm <- function(y, D, coords, kappa, ID_coords, ID_re, s_unique, re_unique,
 
   DtD <- t(D)%*%D
 
-  hess.MC.log.lik <- function(par) {
+  hessian.log.lik <- function(par) {
     beta <- par[ind_beta]
     mu <- as.numeric(D %*% beta) + cov_offset
     sigma2 <- exp(par[ind_sigma2])
