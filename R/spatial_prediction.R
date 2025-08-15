@@ -963,7 +963,8 @@ pred_target_shp <- function(object, shp, shp_target=mean,
     }
   }
 
-  list_mode <- is.list(object$grid_pred)
+  list_mode <- is.list(object$grid_pred) & !(inherits(pred_an_S$grid_pred,"sfc") |
+                                             inherits(pred_an_S$grid_pred,"sf"))
 
   if (list_mode) {
     # Basic validation of list contents (sf/sfc POINTs)
