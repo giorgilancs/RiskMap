@@ -426,7 +426,7 @@ pred_over_grid <- function(object,
     } else {
       simulation <-
         Laplace_sampling_MCMC(y = object$y, units_m = object$units_m, mu = mu, Sigma = Sigma,
-                              sigma2_re = par_hat$sigma2_re,invlink = object$linkf$inv,
+                              sigma2_re = par_hat$sigma2_re, invlink = object$linkf,
                               ID_coords = object$ID_coords, ID_re = object$ID_re,
                               family = object$family, control_mcmc = control_sim,
                               messages = messages)
@@ -963,8 +963,8 @@ pred_target_shp <- function(object, shp, shp_target=mean,
     }
   }
 
-  list_mode <- is.list(object$grid_pred) & !(inherits(pred_an_S$grid_pred,"sfc") |
-                                             inherits(pred_an_S$grid_pred,"sf"))
+  list_mode <- is.list(object$grid_pred) & !(inherits(object$grid_pred,"sfc") |
+                                             inherits(object$grid_pred,"sf"))
 
   if (list_mode) {
     # Basic validation of list contents (sf/sfc POINTs)
@@ -1032,6 +1032,8 @@ pred_target_shp <- function(object, shp, shp_target=mean,
         }
       }
     }
+  } else{
+    n_pred <- nrow(st_coordinates(object$grid_pred))
   }
 
 
