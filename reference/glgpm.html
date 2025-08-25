@@ -41,6 +41,7 @@
 <span>  <span class="va">formula</span>,</span>
 <span>  <span class="va">data</span>,</span>
 <span>  <span class="va">family</span>,</span>
+<span>  invlink <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  den <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  crs <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  convert_to_crs <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -70,6 +71,10 @@
 
 <dt id="arg-family">family<a class="anchor" aria-label="anchor" href="#arg-family"></a></dt>
 <dd><p>A character string specifying the distribution of the response variable. Must be one of "gaussian", "binomial", or "poisson".</p></dd>
+
+
+<dt id="arg-invlink">invlink<a class="anchor" aria-label="anchor" href="#arg-invlink"></a></dt>
+<dd><p>A function that defines the inverse of the link function for the distribution of the data given the random effects.</p></dd>
 
 
 <dt id="arg-den">den<a class="anchor" aria-label="anchor" href="#arg-den"></a></dt>
