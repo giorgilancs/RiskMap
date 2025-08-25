@@ -14,7 +14,8 @@ maxim.integrand(
   family,
   sigma2_re = NULL,
   hessian = FALSE,
-  gradient = FALSE
+  gradient = FALSE,
+  invlink = NULL
 )
 }
 \arguments{

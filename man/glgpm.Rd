@@ -8,6 +8,7 @@ glgpm(
   formula,
   data,
   family,
+  invlink = NULL,
   den = NULL,
   crs = NULL,
   convert_to_crs = NULL,
@@ -28,6 +29,8 @@ glgpm(
 \item{data}{A data frame or sf object containing the variables in the model.}
 
 \item{family}{A character string specifying the distribution of the response variable. Must be one of "gaussian", "binomial", or "poisson".}
+
+\item{invlink}{A function that defines the inverse of the link function for the distribution of the data given the random effects.}
 
 \item{den}{Optional offset for binomial or Poisson distributions. If not provided, defaults to 1 for binomial.}
 

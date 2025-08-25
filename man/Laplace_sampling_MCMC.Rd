@@ -14,6 +14,7 @@ Laplace_sampling_MCMC(
   sigma2_re = NULL,
   family,
   control_mcmc,
+  invlink = NULL,
   Sigma_pd = NULL,
   mean_pd = NULL,
   messages = TRUE

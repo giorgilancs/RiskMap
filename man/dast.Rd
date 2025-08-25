@@ -8,10 +8,10 @@ dast(
   formula,
   data,
   den = NULL,
+  time,
   mda_times,
   int_mat,
   penalty = NULL,
-  sst = FALSE,
   drop = NULL,
   power_val,
   crs = NULL,
@@ -27,11 +27,13 @@ dast(
 )
 }
 \arguments{
-\item{formula}{A model formula specifying the response variable and predictors.}
+\item{formula}{A model formula specifying the response variable, predictors, and the GP structure through \code{gp()}.}
 
-\item{data}{A `data.frame` or `sf` object containing the dataset.}
+\item{data}{A \code{data.frame} or \code{sf} object containing the dataset.}
 
 \item{den}{The denominator for binomial models.}
+
+\item{time}{A variable in \code{data} giving the survey times of observations (required).}
 
 \item{mda_times}{A vector specifying the mass drug administration (MDA) times.}
 
@@ -48,55 +50,62 @@ must be \code{n * n_mda}, where \code{n} is the number of rows of \code{data} an
 
 \item{convert_to_crs}{CRS to which spatial data should be converted.}
 
-\item{scale_to_km}{Logical; whether to scale distances to kilometers (default: `TRUE`).}
+\item{scale_to_km}{Logical; whether to scale distances to kilometers (default: \code{TRUE}).}
 
-\item{control_mcmc}{A list of MCMC control parameters, typically from `set_control_sim()`.}
+\item{control_mcmc}{A list of MCMC control parameters, typically from \code{set_control_sim()}.}
 
 \item{par0}{Optional list of initial parameter values.}
 
 \item{S_samples}{Number of posterior samples to retain.}
 
-\item{return_samples}{Logical; whether to return posterior samples (default: `TRUE`).}
+\item{return_samples}{Logical; whether to return posterior samples (default: \code{TRUE}).}
 
-\item{messages}{Logical; whether to print messages (default: `TRUE`).}
+\item{messages}{Logical; whether to print messages (default: \code{TRUE}).}
 
 \item{start_pars}{List of starting values for parameters.}
-
-\item{survey_times}{The variable indicating the survey times.}
 }
 \value{
-A list containing model estimates, posterior samples, and metadata.
-
-A list containing:
-
-- `y`: Response variable values.
-- `D`: Covariate matrix.
-- `coords`: Unique spatial coordinates.
-- `mda_times`: MDA time points.
-- `survey_times_data`: Survey time data.
-- `int_mat`: Intervention matrix.
-- `ID_coords`: Indices of spatial locations.
-- `re`: Random effects levels (if applicable).
-- `ID_re`: Indices of random effects (if applicable).
-- `power_val`: Power of the MDA impact function.
-- `fix_tau2`: Fixed tau-squared value (if applicable).
-- `fix_alpha`: Fixed alpha value (if applicable).
-- `formula`: Model formula.
-- `crs`: Coordinate reference system.
-- `scale_to_km`: Indicator of distance scaling.
-- `data_sf`: Processed spatial dataset.
-- `family`: Model family (e.g., "binomial").
-- `kappa`: Smoothness parameter.
-- `units_m`: Denominator for binomial models.
-- `cov_offset`: Offset for covariates.
-- `call`: Function call.
-- `penalty`: Penalty function details (if applicable).
-- `posterior_samples`: Posterior samples if `return_samples = TRUE`.
+A list containing model estimates, posterior samples, and metadata, including:
+\itemize{
+  \item \code{y}: Response variable values.
+  \item \code{D}: Covariate matrix.
+  \item \code{coords}: Unique spatial coordinates.
+  \item \code{mda_times}: MDA time points.
+  \item \code{survey_times_data}: Survey time data from the \code{time} argument.
+  \item \code{time}: GP temporal index if specified in \code{gp(x,y,t_gp)}.
+  \item \code{int_mat}: Intervention matrix.
+  \item \code{ID_coords}: Indices of spatial locations (and time if spatio-temporal GP).
+  \item \code{re}: Random effects levels (if applicable).
+  \item \code{ID_re}: Indices of random effects (if applicable).
+  \item \code{power_val}: Power of the MDA impact function.
+  \item \code{fix_tau2}: Fixed tau-squared value (if applicable).
+  \item \code{fix_alpha}: Fixed alpha value (if applicable).
+  \item \code{formula}: Model formula.
+  \item \code{crs}: Coordinate reference system.
+  \item \code{scale_to_km}: Indicator of distance scaling.
+  \item \code{data_sf}: Processed spatial dataset.
+  \item \code{family}: Model family (e.g., "binomial").
+  \item \code{sst}: Logical indicator of whether a spatio-temporal GP was used.
+  \item \code{kappa}: Smoothness parameter.
+  \item \code{units_m}: Denominator for binomial models.
+  \item \code{cov_offset}: Offset for covariates.
+  \item \code{call}: Function call.
+  \item \code{penalty}: Penalty function details (if applicable).
+  \item \code{posterior_samples}: Posterior samples if \code{return_samples = TRUE}.
+}
 }
 \description{
-The function fits a decay-adjusted spatio-temporal (DAST) model using Monte Carlo maximum liklihood.
-The DAST model allows for the incorporation of the temporal decay in diease prevalence due
+The function fits a decay-adjusted spatio-temporal (DAST) model using Monte Carlo maximum likelihood.
+The DAST model allows for the incorporation of temporal decay in disease prevalence due
 to the impact of mass drug administration (MDA). The function requires the full MDA history as detailed in the arguments below.
+
+Spatial and spatio-temporal dependence is specified through the \code{gp()} term in the model formula:
+\itemize{
+  \item \code{gp(x, y)} fits a purely spatial Gaussian process.
+  \item \code{gp(x, y, t_gp)} fits a spatio-temporal Gaussian process, where \code{t_gp} is used as the GP temporal index.
+}
+In all cases, the \code{time} argument must be specified separately and provides the observation-level survey times used
+in modelling MDA impact. These survey times may differ from the GP temporal index.
 }
 \seealso{
 \code{\link{set_control_sim}}, \code{\link{summary.RiskMap}}, \code{\link{to_table}}
