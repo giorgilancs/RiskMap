@@ -1463,6 +1463,16 @@ update_predictors <- function(object,
 ##' @param plot_fold Logical; if `TRUE`, plots each fold's test set.
 ##' @param messages Logical; if `TRUE`, displays progress messages.
 ##' @param which_metric Character vector; one or more of `"CRPS"`, `"SCRPS"`, or `"AnPIT"`, to specify the predictive performance metrics to compute.
+##' @param user_split A user-defined cross-validation split. Either:
+##'   * a matrix with \code{nrow = n} (number of observations) and
+##'     \code{ncol = iter} (number of iterations), where entries of \code{1}
+##'     indicate membership in the test set for that iteration and \code{0}
+##'     indicate training set; or
+##'   * a list of length \code{iter}, where each element is either a vector of
+##'     test indices, or a list with components \code{in_id} (training indices)
+##'     and \code{out_id} (test indices).
+##'   When supplied, \code{user_split} overrides the automatic clustering or
+##'   regularized distance splitting defined by \code{method}.
 ##' @param ... Additional arguments passed to clustering or subsampling functions.
 ##'
 ##' @return A list of class `RiskMap.spatial.cv`, containing:
@@ -1496,226 +1506,329 @@ assess_pp <- function(object,
                       iter = 1,
                       fold = NULL, n_size = NULL,
                       control_sim = set_control_sim(),
-                      method, min_dist = NULL,
+                      method,
+                      min_dist = NULL,
                       plot_fold = TRUE,
                       messages = TRUE,
                       which_metric = c("AnPIT", "CRPS", "SCRPS"),
+                      user_split = NULL,
                       ...) {
 
-  ## ───────────────────────────────────── helpers ────────────────────────────── ##
-  is_list_of_riskmap <- function(object) {
-    is.list(object) &&
-      all(vapply(object, inherits, logical(1), what = "RiskMap"))
+  ## ─────────────────────────── helpers ─────────────────────────── ##
+  is_list_of_riskmap <- function(x) {
+    is.list(x) && all(vapply(x, inherits, logical(1), what = "RiskMap"))
+  }
+  is_dast_fit <- function(fit) {
+    !is.null(fit$mda_times) && !is.null(fit$int_mat)
   }
 
   crps_gaussian <- function(y, mu, sigma) {
     if (sigma == 0) return(0)
-    z   <- (y - mu) / sigma
-    2*dnorm(z) + z * (2 * pnorm(z) - 1) - 1 / sqrt(pi)
+    z <- (y - mu) / sigma
+    2 * stats::dnorm(z) + z * (2 * stats::pnorm(z) - 1) - 1 / sqrt(pi)
   }
-
-  ##  Discrete CRPS  (Binomial / Poisson)  ------------------------------------ ##
   crps_discrete <- function(y, Fk) {
-    k      <- seq_along(Fk) - 1
+    k <- seq_along(Fk) - 1
     sum((Fk - as.numeric(k >= y))^2)
   }
-
-  ## expectation of CRPS under the predictive pmf  (needed for SCRPS) ---------- ##
   exp_crps_discrete <- function(Fk, pk) {
     k <- seq_along(pk) - 1
     sum(pk * vapply(k, crps_discrete, numeric(1), Fk = Fk))
   }
 
-  ## ───────────────────────────── sanity checks (unchanged) ─────────────────── ##
+  if(!is.null(user_split)) {
+    iter <- ncol(user_split)
+  }
+  ## ────────────────────── sanity checks (unchanged) ─────────────────────── ##
   if (!is_list_of_riskmap(object))
-    stop("`object` must be a list of model fits obtained with `glgpm()`")
+    stop("`object` must be a list of fitted models of class 'RiskMap'.")
 
   if (!all(which_metric %in% c("CRPS", "SCRPS", "AnPIT")))
     stop("`which_metric` must only contain 'CRPS', 'SCRPS' or 'AnPIT'")
 
-  if (!method %in% c("cluster", "regularized"))
-    stop("`method` must be either 'cluster' or 'regularized'")
+  if (is.null(user_split)) {
+    if (!method %in% c("cluster", "regularized"))
+      stop("`method` must be either 'cluster' or 'regularized' (unless `user_split` is supplied).")
 
-  if (method == "regularized") {
-    if (is.null(min_dist))
-      stop("for 'regularized', supply `min_dist`")
-    if (is.null(n_size))
-      stop("for 'regularized', supply `n_size`")
+    if (method == "regularized") {
+      if (is.null(min_dist)) stop("for 'regularized', supply `min_dist`")
+      if (is.null(n_size))   stop("for 'regularized', supply `n_size`")
+    }
+    if (method == "cluster" && is.null(fold))
+      stop("for 'cluster', supply `fold`")
   }
-
-  if (method == "cluster" && is.null(fold))
-    stop("for 'cluster', supply `fold`")
 
   if (!inherits(control_sim, "mcmc.RiskMap"))
     stop("`control_sim` must come from `set_control_sim()`")
 
   get_CRPS  <- "CRPS"  %in% which_metric
   get_SCRPS <- "SCRPS" %in% which_metric
-  get_AnPIT <- "AnPIT" %in% which_metric      # will hold PIT for Gaussian
+  get_AnPIT <- "AnPIT" %in% which_metric
 
-  ## ─────────────────────────────── test–train splitting ────────────────────── ##
+  ## ───────────────────────────── data & splits ───────────────────────────── ##
   object1 <- object[[1]]
   data_sf <- object1$data_sf
+  n_obs   <- nrow(data_sf)
 
-  if (method == "cluster") {
-    data_split <- spatial_clustering_cv(data = data_sf,
-                                        v = fold, repeats = iter, ...)
+  make_splits_from_user <- function(usr, n_iter_expected) {
+    spl <- vector("list", n_iter_expected)
+    if (is.matrix(usr)) {
+      if (nrow(usr) != n_obs)
+        stop("`user_split` matrix must have nrow == nrow(data).")
+      if (ncol(usr) != n_iter_expected)
+        stop("`user_split` matrix must have ncol == `iter`.")
+      for (i in seq_len(n_iter_expected)) {
+        out_id <- which(usr[, i] != 0 & !is.na(usr[, i]))
+        in_id  <- setdiff(seq_len(n_obs), out_id)
+        spl[[i]] <- list(in_id = in_id, out_id = out_id,
+                         data = data_sf[in_id, ],
+                         data_test = data_sf[out_id, ])
+      }
+    } else if (is.list(usr)) {
+      if (length(usr) != n_iter_expected)
+        stop("`user_split` list must have length == `iter`.")
+      for (i in seq_len(n_iter_expected)) {
+        ui <- usr[[i]]
+        if (is.list(ui) && !is.null(ui$in_id) && !is.null(ui$out_id)) {
+          in_id  <- ui$in_id
+          out_id <- ui$out_id
+        } else if (is.integer(ui) || is.double(ui)) {
+          out_id <- as.integer(ui)
+          in_id  <- setdiff(seq_len(n_obs), out_id)
+        } else {
+          stop("Each element of `user_split` must be a vector of test indices or a list(in_id=..., out_id=...).")
+        }
+        spl[[i]] <- list(in_id = in_id, out_id = out_id,
+                         data = data_sf[in_id, ],
+                         data_test = data_sf[out_id, ])
+      }
+    } else {
+      stop("`user_split` must be a matrix (nrow=n, ncol=iter) or a list.")
+    }
+    list(splits = spl)
+  }
+
+  if (!is.null(user_split)) {
+    data_split <- make_splits_from_user(user_split, iter)
+    n_iter <- iter
+    if (plot_fold) {
+      # quick plot of user-defined test sets
+      suppressWarnings({
+        library(ggplot2)
+        if (n_iter == 1) {
+          print(ggplot(data_split$splits[[1]]$data_test) + geom_sf() + theme_minimal() + ggtitle("Test set"))
+        } else {
+          library(gridExtra)
+          plots <- lapply(seq_len(n_iter), function(i)
+            ggplot(data_split$splits[[i]]$data_test) + geom_sf() + theme_minimal() + ggtitle(paste("Test", i)))
+          gridExtra::grid.arrange(grobs = plots, ncol = 2)
+        }
+      })
+    }
+  } else if (method == "cluster") {
+    data_split <- spatial_clustering_cv(data = data_sf, v = fold, repeats = iter, ...)
+    # ensure out_id present
     all_ids <- seq_len(nrow(data_sf))
-
     for (i in seq_along(data_split$splits)) {
       if (is.null(data_split$splits[[i]]$out_id) || all(is.na(data_split$splits[[i]]$out_id))) {
         in_id <- data_split$splits[[i]]$in_id
         data_split$splits[[i]]$out_id <- setdiff(all_ids, in_id)
       }
     }
-
-  } else {                                            # regularised distance split
+    n_iter <- iter * fold
+    if (plot_fold) print(autoplot(data_split))
+  } else { # regularized
     data_split <- list(splits = vector("list", iter))
     for (i in seq_len(iter)) {
-      data_split$splits[[i]]            <- list()
-      ## --------- sample at the *location* level (duplicates removed) -------- ##
-      locations_sf                       <- data_sf[!duplicated(st_as_text(data_sf$geometry)), ]
-      data_split$splits[[i]]$data_test   <- subsample.distance(
-        locations_sf, size = n_size, d = min_dist * 1000, ...
-      )
-      test_geom                          <- st_as_text(data_split$splits[[i]]$data_test$geometry)
-      in_test                            <- st_as_text(data_sf$geometry) %in% test_geom
-      data_split$splits[[i]]$out_id      <- which(in_test)
-      data_split$splits[[i]]$in_id       <- which(!in_test)
-      data_split$splits[[i]]$data        <- data_sf[!in_test, ]
+      locations_sf <- data_sf[!duplicated(sf::st_as_text(data_sf$geometry)), ]
+      data_split$splits[[i]] <- list()
+      data_split$splits[[i]]$data_test <- subsample.distance(locations_sf, size = n_size, d = min_dist * 1000, ...)
+      test_geom <- sf::st_as_text(data_split$splits[[i]]$data_test$geometry)
+      in_test   <- sf::st_as_text(data_sf$geometry) %in% test_geom
+      data_split$splits[[i]]$out_id <- which(in_test)
+      data_split$splits[[i]]$in_id  <- which(!in_test)
+      data_split$splits[[i]]$data   <- data_sf[!in_test, ]
+    }
+    n_iter <- iter
+    if (plot_fold) {
+      suppressWarnings({
+        library(ggplot2); library(gridExtra)
+        plots <- lapply(seq_len(n_iter), function(i)
+          ggplot(data_split$splits[[i]]$data_test) + geom_sf() + theme_minimal() + ggtitle(paste("Subset", i)))
+        if (n_iter > 1) grid.arrange(grobs = plots, ncol = 2) else print(plots[[1]])
+      })
     }
   }
 
-  n_iter <- if (method == "cluster") iter * fold else iter
-  if (plot_fold) {
-    if (method == "cluster") {
-      print(autoplot(data_split))
-    } else {
-      library(gridExtra)
-      plots <- lapply(seq_len(n_iter), function(i)
-        ggplot(data_split$splits[[i]]$data_test) +
-          geom_sf() + theme_minimal() +
-          ggtitle(paste("Subset", i))
-      )
-      if (n_iter > 1) grid.arrange(grobs = plots, ncol = 2) else print(plots[[1]])
-    }
-  }
-
-  ## ───────────────────────── initialise output containers ──────────────────── ##
-  n_models   <- length(object)
+  ## ───────────────────────── initialise output ───────────────────────── ##
+  n_models    <- length(object)
   model_names <- names(object)
   out <- list(test_set = vector("list", n_iter), model = list())
 
-  ## ─────────────────────────── iterate over models ─────────────────────────── ##
+  ## ─────────────────────────── iterate over models ───────────────────────── ##
   for (h in seq_len(n_models)) {
 
-    par_hat   <- coef(object[[h]])
-    den_name  <- as.character(object[[h]]$call$den)
-    fam       <- object[[h]]$family             # "gaussian", "binomial", "poisson"
+    fit0      <- object[[h]]
+    par_hat   <- coef(fit0)
+    den_name  <- as.character(fit0$call$den)
+    fam       <- fit0$family
     linkfun   <- switch(fam,
                         gaussian = identity,
-                        binomial = function(x) plogis(x),
-                        poisson  = function(x) exp(x))
-
-    ## containers for this model --------------------------------------------- ##
-    if (get_CRPS)   CRPS  <- vector("list", n_iter)
-    if (get_SCRPS) { y_CRPS <- vector("list", n_iter)
-    SCRPS  <- vector("list", n_iter) }
-    if (get_AnPIT) {           # will store PIT if Gaussian
-      if (fam == "gaussian")  PIT  <- vector("list", n_iter)
-      else                    AnPIT <- vector("list", n_iter)
+                        binomial = plogis,
+                        poisson  = exp)
+    dast_flag <- is_dast_fit(fit0)
+    if (messages) {
+      message(sprintf("\nModel '%s' (%s)", model_names[h], if (dast_flag) "DAST" else "non-DAST"))
     }
 
-    ## ───────────── iterate over CV splits (refit where requested) ─────────── ##
+    ## containers for this model
+    if (get_CRPS)   CRPS  <- vector("list", n_iter)
+    if (get_SCRPS) { y_CRPS <- vector("list", n_iter); SCRPS <- vector("list", n_iter) }
+    if (get_AnPIT) {
+      if (fam == "gaussian") PIT <- vector("list", n_iter) else AnPIT <- vector("list", n_iter)
+    }
+
+    ## ─────────────────── iterate over CV splits (refit as needed) ─────────────────── ##
     for (i in seq_len(n_iter)) {
 
-      ## ------------- optionally refit -------------------------------------- ##
+      in_id  <- data_split$splits[[i]]$in_id
+      out_id <- data_split$splits[[i]]$out_id
+
+      ## ----- refit or slice -----
       if (!keep_par_fixed) {
         message("\nRe-estimating model for subset ", i)
-        refit_i <- eval(bquote(
-          glgpm(.(
-            formula      = object[[h]]$formula,
-            data         = data_sf[data_split$splits[[i]]$in_id, ],
-            cov_offset   = .(object[[h]]$cov_offset),
-            family       = .(fam),
-            crs          = .(object[[h]]$crs),
-            scale_to_km  = .(object[[h]]$scale_to_km),
-            control_mcmc = control_sim,
-            fix_var_me   = .(object[[h]]$fix_var_me),
-            den          = .(as.name(den_name)),
-            messages     = FALSE,
-            start_pars   = par_hat
+        crs_num <- if (is.numeric(fit0$crs)) {
+          as.integer(fit0$crs)
+        } else {
+          as.integer(sub(".*:(\\d+)$", "\\1", fit0$crs))
+        }
+
+        fit0$crs <- crs_num
+        if (!dast_flag) {
+          ## Original path (unchanged)
+          refit_i <- eval(bquote(
+            glgpm(.(
+              formula      = fit0$formula,
+              data         = data_sf[in_id, ],
+              cov_offset   = .(fit0$cov_offset),
+              family       = .(fam),
+              crs          = .(fit0$crs),
+              scale_to_km  = .(fit0$scale_to_km),
+              control_mcmc = control_sim,
+              fix_var_me   = .(fit0$fix_var_me),
+              den          = .(as.name(den_name)),
+              messages     = FALSE,
+              start_pars   = par_hat
+            ))
           ))
-        ))
-      } else {                                  # quick copy without re-fitting
-        refit_i <- object[[h]]
-        keep    <- data_split$splits[[i]]$in_id
-        drop    <- data_split$splits[[i]]$out_id
+        } else {
+          ## DAST refit
+          time_sym <- fit0$call$time
+          refit_i <- eval(bquote(
+            dast(
+              formula       = .(fit0$formula),
+              data          = data_sf[in_id, ],
+              den           = .(as.name(den_name)),
+              time          = .(time_sym),
+              mda_times     = .(fit0$mda_times),
+              int_mat       = .(fit0$int_mat[in_id, , drop = FALSE]),
+              penalty       = .(fit0$penalty),
+              drop          = .(fit0$fix_alpha),
+              power_val     = .(fit0$power_val),
+              crs           = .(fit0$crs),
+              scale_to_km   = .(fit0$scale_to_km),
+              control_mcmc  = control_sim,
+              messages      = FALSE
+            )
+          ))
+        }
+      } else {
+        ## quick slice without re-fitting
+        refit_i <- fit0
+        keep <- in_id
         refit_i$data_sf  <- refit_i$data_sf [keep, ]
         refit_i$units_m  <- refit_i$units_m[keep]
-
-        keep_coord <- unique(refit_i$ID_coords[keep])   # rows in coords to keep
-        refit_i$coords <- refit_i$coords[keep_coord, , drop = FALSE]
-
+        keep_coord <- unique(refit_i$ID_coords[keep])
+        refit_i$coords   <- refit_i$coords[keep_coord, , drop = FALSE]
         refit_i$y        <- refit_i$y      [keep]
-        refit_i$D        <- refit_i$D      [keep, ]
+        refit_i$D        <- refit_i$D      [keep, , drop = FALSE]
         if (!is.null(refit_i$cov_offset))
           refit_i$cov_offset <- refit_i$cov_offset[keep]
+        if (!is.null(refit_i$ID_re)) {
+          refit_i$ID_re <- refit_i$ID_re[keep, , drop = FALSE]
+        }
+        if (dast_flag) {
+          refit_i$survey_times_data <- refit_i$survey_times_data[keep]
+          refit_i$int_mat           <- refit_i$int_mat[keep, , drop = FALSE]
+        }
+        ## recompute ID_coords mapping
         refit_i$ID_coords <- compute_ID_coords(refit_i$data_sf)$ID_coords
       }
 
-      ## ------------- posterior predictive samples for *held-out* points ---- ##
-      data_test_i <- data_sf[data_split$splits[[i]]$out_id, ]
-      data_test_i <- data_test_i[complete.cases(st_drop_geometry(data_test_i)), ]
-
+      ## ----- held-out set and offsets -----
+      data_test_i <- data_sf[out_id, ]
+      data_test_i <- data_test_i[complete.cases(sf::st_drop_geometry(data_test_i)), ]
       out$test_set[[i]] <- data_test_i
-      pred_coff_i <- if(is.null(object[[h]]$cov_offset)) {
-        rep(0, nrow(data_test_i))
+
+      pred_coff_i <- if (is.null(fit0$cov_offset)) rep(0, nrow(data_test_i)) else fit0$cov_offset[out_id]
+
+      message("\nModel: ", model_names[h], "\nSpatial prediction for subset ", i)
+
+      ## ----- prediction over test set -----
+      pred_S <- pred_over_grid(
+        object          = refit_i,
+        grid_pred       = sf::st_as_sfc(data_test_i),
+        control_sim     = control_sim,
+        predictors      = data_test_i,
+        pred_cov_offset = pred_coff_i,
+        type            = "marginal",
+        messages        = FALSE
+      )
+      if (dast_flag) {
+        ## Build the DAST prediction inputs
+        time_col  <- deparse(fit0$call$time)
+        grid_pred_list <- list(
+          geometry            = sf::st_as_sfc(data_test_i),
+          survey_times_data   = data_test_i[[time_col]],
+          int_mat             = fit0$int_mat[out_id, , drop = FALSE],
+          mda_times           = fit0$mda_times
+        )
+
+        mda_eff_cov <- compute_mda_effect(data_test_i[[time_col]],
+                                           mda_times = fit0$mda_times,
+                                           intervention = grid_pred_list$int_mat,
+                                           alpha = coef.RiskMap(fit0)$alpha,
+                                           gamma = coef.RiskMap(fit0)$gamma, kappa = fit0$power_val)
+        eta_samp <- t(pred_S$S_samples+pred_S$mu_pred)
+        mu_samp  <- t((1/(1+exp(-eta_samp))))*mda_eff_cov
+        eta_samp <- t(eta_samp)
+
       } else {
-        object[[h]]$cov_offset[data_split$splits[[i]]$out_id]
+        pred_lp  <- pred_target_grid(
+          pred_S,
+          include_nugget     = is.null(refit_i$fix_tau2) || refit_i$fix_tau2 != 0,
+          include_cov_offset = !all(refit_i$cov_offset == 0)
+        )
+        eta_samp <- pred_lp$lp_samples
+        if (fam == "gaussian") {
+          sigma2_me <- if (is.null(refit_i$fix_var_me)) coef(refit_i)$sigma2_me else refit_i$fix_var_me
+          eta_samp <- eta_samp + sqrt(sigma2_me) * stats::rnorm(length(eta_samp))
+        }
+        mu_samp <- linkfun(eta_samp)
       }
 
-      message("\nModel: ", model_names[h],
-              "\nSpatial prediction for subset ", i, "\n")
-
-      pred_S <- pred_over_grid(object       = refit_i,
-                               grid_pred     = st_as_sfc(data_test_i),
-                               control_sim   = control_sim,
-                               predictors    = data_test_i,
-                               pred_cov_offset = pred_coff_i,
-                               type          = "marginal",
-                               messages      = FALSE)
-
-      pred_lp  <- pred_target_grid(pred_S,
-                                   include_nugget    = is.null(refit_i$fix_tau2) ||
-                                     refit_i$fix_tau2 != 0,
-                                   include_cov_offset = !all(refit_i$cov_offset==0))
-
-      eta_samp <- pred_lp$lp_samples                  # linear predictor samples
-      if(is.null(refit_i$fix_var_me)) {
-        sigma2_me <- coef(refit_i)$sigma2_me
-      } else {
-        sigma2_me <- refit_i$fix_var_me
-      }
-      if(refit_i$family=="gaussian") eta_samp <- eta_samp + sqrt(sigma2_me)*rnorm(length(eta_samp))
-
-
-      mu_samp  <- linkfun(eta_samp)                   # on response scale
-
-      n_pred   <- nrow(eta_samp)
-      n_draw   <- ncol(eta_samp)
-
+      n_pred <- nrow(eta_samp)
+      n_draw <- ncol(eta_samp)
       if (get_CRPS)   CRPS [[i]] <- numeric(n_pred)
-      if (get_SCRPS) { y_CRPS[[i]] <- numeric(n_pred)
-      SCRPS [[i]] <- numeric(n_pred) }
+      if (get_SCRPS) { y_CRPS[[i]] <- numeric(n_pred); SCRPS[[i]] <- numeric(n_pred) }
 
       if (get_AnPIT) {
-        if (fam == "gaussian")  {
-          PIT_i  <- numeric(n_pred)
+        if (fam == "gaussian") {
+          PIT_i <- numeric(n_pred)
         } else {
-          u_val      <- seq(0, 1, length.out = 1000)
-          AnPIT_i    <- matrix(NA_real_, nrow = length(u_val), ncol = n_pred)
-          npit_fun   <- function(y, u, Fk) {
+          u_val   <- seq(0, 1, length.out = 1000)
+          AnPIT_i <- matrix(NA_real_, nrow = length(u_val), ncol = n_pred)
+          npit_fun <- function(y, u, Fk) {
             F_y1 <- if (y == 0) 0 else Fk[y]
             F_y  <- Fk[y + 1]
             ifelse(u <= F_y1, 0,
@@ -1724,103 +1837,61 @@ assess_pp <- function(object,
         }
       }
 
-      ## --------------------------- loop over locations --------------------- ##
-      units_m_i <- object[[h]]$units_m[data_split$splits[[i]]$out_id]
-      y_i       <- object[[h]]$y      [data_split$splits[[i]]$out_id]
+      units_m_i <- fit0$units_m[out_id]
+      y_i       <- fit0$y      [out_id]
 
       for (j in seq_len(n_pred)) {
-        ## ---------- family-specific predictive pmf/cdf --------------------- ##
         if (fam == "gaussian") {
-
           mu_j <- mean(mu_samp[j, ])
-          sd_j <- sd  (mu_samp[j, ])
-
-          ## CRPS closed form
-          if (get_CRPS)
-            CRPS[[i]][j] <- sd_j * crps_gaussian(y_i[j], mu_j, sd_j)
-
-          ## SCRPS (scaled)
+          sd_j <- stats::sd(mu_samp[j, ])
+          if (get_CRPS)  CRPS[[i]][j] <- sd_j * crps_gaussian(y_i[j], mu_j, sd_j)
           if (get_SCRPS) {
             y_CRPS[[i]][j] <- sd_j / sqrt(pi)
-            SCRPS [[i]][j] <- -0.5 * (1 + CRPS[[i]][j] / y_CRPS[[i]][j] +
-                                        log(2 * abs(y_CRPS[[i]][j])))
+            SCRPS [[i]][j] <- -0.5 * (1 + CRPS[[i]][j] / y_CRPS[[i]][j] + log(2 * abs(y_CRPS[[i]][j])))
           }
-
-          ## PIT
-          if (get_AnPIT) {
-            PIT_i[j] <- pnorm(y_i[j], mean = mu_j, sd = sd_j)
-          }
-        } else {                                # ----- Binomial / Poisson ---- #
+          if (get_AnPIT) PIT_i[j] <- stats::pnorm(y_i[j], mean = mu_j, sd = sd_j)
+        } else {
           if (fam == "binomial") {
-            y_samp <- rbinom(n_draw, size = units_m_i[j], prob = mu_samp[j, ])
+            y_samp  <- stats::rbinom(n_draw, size = units_m_i[j], prob = mu_samp[j, ])
             support <- 0:units_m_i[j]
-          } else {                              # Poisson
+          } else { # Poisson
             lambda  <- units_m_i[j] * mu_samp[j, ]
-            y_samp <- rpois(n_draw, lambda)
-            support <- 0:max(max(y_samp), y_i[j], qpois(0.999, mean(lambda)))
+            y_samp  <- stats::rpois(n_draw, lambda)
+            support <- 0:max(max(y_samp), y_i[j], stats::qpois(0.999, mean(lambda)))
           }
-
-          ## empirical pmf / cdf from the draws
-          pk           <- tabulate(y_samp + 1, nbins = length(support)) / n_draw
-          Fk           <- cumsum(pk)
-
-          ## CRPS discrete
-          if (get_CRPS)
-            CRPS[[i]][j] <- crps_discrete(y_i[j], Fk)
-
-          ## SCRPS
+          pk <- tabulate(y_samp + 1, nbins = length(support)) / n_draw
+          Fk <- cumsum(pk)
+          if (get_CRPS)  CRPS[[i]][j] <- crps_discrete(y_i[j], Fk)
           if (get_SCRPS) {
             y_CRPS[[i]][j] <- exp_crps_discrete(Fk, pk)
-            SCRPS [[i]][j] <- -0.5 * (1 + CRPS[[i]][j] / y_CRPS[[i]][j] +
-                                        log(2 * abs(y_CRPS[[i]][j])))
+            SCRPS [[i]][j] <- -0.5 * (1 + CRPS[[i]][j] / y_CRPS[[i]][j] + log(2 * abs(y_CRPS[[i]][j])))
           }
-
-          ## AnPIT (aggregate NPIT over u grid)
           if (get_AnPIT) {
-            npit_u <- vapply(u_val,
-                             npit_fun, numeric(1),
-                             y = y_i[j], Fk = Fk)
-            AnPIT_i[, j] <- npit_u
+            AnPIT_i[, j] <- vapply(u_val, npit_fun, numeric(1), y = y_i[j], Fk = Fk)
           }
-        } # end family branch
-      }   # end j loop
-
-      ## store metrics for this subset --------------------------------------- ##
-      if (get_AnPIT) {
-        if (fam == "gaussian") {
-          PIT[[i]]   <- PIT_i
-        } else  {
-          AnPIT[[i]] <- rowMeans(AnPIT_i)
-        } # end j loop
-
-        ## store metrics for this subset --------------------------------------- ##
-        if (get_AnPIT) {
-          if (fam == "gaussian") {
-            PIT[[i]]   <- PIT_i
-          } else  {
-            AnPIT[[i]] <- rowMeans(AnPIT_i)
-          }
-        }
-      }   # end i (fold) loop
-
-      ## ─────────────── finalise output for this model ─────────────────────── ##
-      out$model[[model_names[h]]] <- list(score = list())
-      if (get_CRPS)  out$model[[model_names[h]]]$score$CRPS  <- CRPS
-      if (get_SCRPS) out$model[[model_names[h]]]$score$SCRPS <- SCRPS
-
-      if (get_AnPIT) {
-        if (fam == "gaussian") {
-          out$model[[model_names[h]]]$PIT   <- PIT
-        } else {
-          out$model[[model_names[h]]]$AnPIT <- AnPIT
         }
       }
+
+      if (get_AnPIT) {
+        if (fam == "gaussian") PIT[[i]] <- PIT_i else AnPIT[[i]] <- rowMeans(AnPIT_i)
+      }
+
+    } # end i loop
+
+    ## ─────────────── finalise output for this model ─────────────── ##
+    out$model[[model_names[h]]] <- list(score = list())
+    if (get_CRPS)  out$model[[model_names[h]]]$score$CRPS  <- CRPS
+    if (get_SCRPS) out$model[[model_names[h]]]$score$SCRPS <- SCRPS
+    if (get_AnPIT) {
+      if (fam == "gaussian") out$model[[model_names[h]]]$PIT <- PIT else out$model[[model_names[h]]]$AnPIT <- AnPIT
     }
-  }
+
+  } # end h loop
 
   class(out) <- "RiskMap.spatial.cv"
   return(out)
 }
+
 
 
 ##' Simulate surface data based on a spatial model

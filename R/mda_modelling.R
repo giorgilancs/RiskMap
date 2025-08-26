@@ -219,7 +219,7 @@ dast_initial_value <- function(y, D, units_m, int_mat, survey_times_data,
 dast <- function(formula,
                  data,
                  den = NULL,
-                 time,                      # REQUIRED: observation time column (for MDA/history)
+                 time,
                  mda_times, int_mat,
                  penalty = NULL,
                  drop = NULL, power_val,

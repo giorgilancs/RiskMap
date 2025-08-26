@@ -16,6 +16,7 @@ assess_pp(
   plot_fold = TRUE,
   messages = TRUE,
   which_metric = c("AnPIT", "CRPS", "SCRPS"),
+  user_split = NULL,
   ...
 )
 }
@@ -44,6 +45,17 @@ subset of locations.}
 \item{messages}{Logical; if `TRUE`, displays progress messages.}
 
 \item{which_metric}{Character vector; one or more of `"CRPS"`, `"SCRPS"`, or `"AnPIT"`, to specify the predictive performance metrics to compute.}
+
+\item{user_split}{A user-defined cross-validation split. Either:
+* a matrix with \code{nrow = n} (number of observations) and
+  \code{ncol = iter} (number of iterations), where entries of \code{1}
+  indicate membership in the test set for that iteration and \code{0}
+  indicate training set; or
+* a list of length \code{iter}, where each element is either a vector of
+  test indices, or a list with components \code{in_id} (training indices)
+  and \code{out_id} (test indices).
+When supplied, \code{user_split} overrides the automatic clustering or
+regularized distance splitting defined by \code{method}.}
 
 \item{...}{Additional arguments passed to clustering or subsampling functions.}
 }
