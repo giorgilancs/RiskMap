@@ -1363,81 +1363,121 @@ plot.RiskMap_pred_target_shp <- function(x, which_target = "linear_target",
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
 ##' @export
-update_predictors <- function(object,
-                              predictors) {
-  if(!inherits(object,
-               what = "RiskMap.pred.re", which = FALSE)) {
-    stop("The object passed to 'object' must be an output of
-         the function 'glgpm'")
+update_predictors <- function(object, predictors) {
+  if (!inherits(object, what = "RiskMap.pred.re", which = FALSE)) {
+    stop("The object passed to 'object' must be an output of the function 'glgpm'")
   }
-  grp <- st_coordinates(object$grid_pred)
-  n_pred <- nrow(grp)
+
+  list_mode <- is.list(object$grid_pred)
   par_hat <- object$par_hat
   p <- length(par_hat$beta)
 
+  if (p == 1) {
+    stop("No update of the predictors can be done for an intercept-only model")
+  }
+
   inter_f <- object$inter_f
   inter_lt_f <- inter_f
-  inter_lt_f$pf <- update(inter_lt_f$pf, NULL ~.)
+  inter_lt_f$pf <- update(inter_lt_f$pf, NULL ~ .)
 
-  if(p==1) {
-    stop("No update of the prectors can be done for an intercept only model")
-  }
+  if (list_mode) {
+    if (!is.list(predictors)) stop("If object$grid_pred is a list, then 'predictors' must also be a list")
+    if (length(predictors) != length(object$grid_pred)) stop("Length of 'predictors' list must match length of 'grid_pred' list")
 
-  if(!is.data.frame(predictors)) stop("'predictors' must be an object of class 'data.frame'")
-  if(nrow(predictors)!=n_pred) stop("the values provided for 'predictors' do not match the prediction grid passed to 'grid_pred'")
-
-  if(any(is.na(predictors))) {
-    warning("There are missing values in 'predictors'; these values have been removed
-              alongside the corresponding prediction locations, and predictive samples
-            for the random effects")
-  }
-
-  if(!is.null(object$re_predictors)) {
-
-    comb_pred <- data.frame(predictors,
-                            object$re_predictors)
-    ind_c <- complete.cases(comb_pred)
-    predictors_aux <- data.frame(na.omit(comb_pred)[,1:ncol(predictors)])
-    colnames(predictors_aux) <- colnames(predictors)
-    predictors <- predictors_aux
-
-    re_predictors_aux <- data.frame(na.omit(comb_pred)[,(ncol(predictors)+1):
-                                                         (ncol(predictors)+
-                                                            ncol(object$re_predictors))])
-    colnames(re_predictors_aux) <- colnames(re_predictors_aux)
-    object$re_predictors <- re_predictors_aux
-
-    n_re <- length(object$re$samples)
-    for(i in 1:n_re) {
-      object$re$D_pred[[i]] <- object$re$D_pred[[i]][ind_c,]
+    n_pred_list <- lapply(object$grid_pred, function(x) nrow(st_coordinates(x)))
+    for (i in seq_along(predictors)) {
+      if (!is.data.frame(predictors[[i]])) stop(sprintf("predictors[[%d]] must be a data.frame", i))
+      if (nrow(predictors[[i]]) != n_pred_list[i]) stop(sprintf("predictors[[%d]] does not match the number of prediction locations", i))
     }
 
+    if (!is.null(object$re_predictors)) {
+      for (i in seq_along(predictors)) {
+        comb_pred <- data.frame(predictors[[i]], object$re_predictors[[i]])
+        ind_c <- complete.cases(comb_pred)
+
+        predictors_aux <- predictors[[i]][ind_c, , drop = FALSE]
+        predictors[[i]] <- predictors_aux
+
+        re_predictors_aux <- object$re_predictors[[i]][ind_c, , drop = FALSE]
+        object$re_predictors[[i]] <- re_predictors_aux
+
+        n_re <- length(object$re$samples)
+        for (r in 1:n_re) {
+          object$re$D_pred[[r]][[i]] <- object$re$D_pred[[r]][[i]][ind_c, , drop = FALSE]
+        }
+
+        object$grid_pred[[i]] <- object$grid_pred[[i]][ind_c, ]
+        if (is.matrix(object$S_samples[[i]])) {
+          object$S_samples[[i]] <- object$S_samples[[i]][ind_c, , drop = FALSE]
+        } else {
+          object$S_samples[[i]] <- object$S_samples[[i]][ind_c]
+        }
+      }
+    } else {
+      for (i in seq_along(predictors)) {
+        comb_pred <- predictors[[i]]
+        ind_c <- complete.cases(comb_pred)
+        predictors[[i]] <- predictors[[i]][ind_c, , drop = FALSE]
+
+        object$grid_pred[[i]] <- object$grid_pred[[i]][ind_c, ]
+        if (is.matrix(object$S_samples[[i]])) {
+          object$S_samples[[i]] <- object$S_samples[[i]][ind_c, , drop = FALSE]
+        } else {
+          object$S_samples[[i]] <- object$S_samples[[i]][ind_c]
+        }
+      }
+    }
+
+    object$mu_pred <- vector("list", length(predictors))
+    for (i in seq_along(predictors)) {
+      mf_pred <- model.frame(inter_lt_f$pf, data = predictors[[i]], na.action = na.fail)
+      D_pred <- as.matrix(model.matrix(attr(mf_pred, "terms"), data = predictors[[i]]))
+      if (ncol(D_pred) != p) stop("Mismatch in number of predictors")
+      object$mu_pred[[i]] <- as.numeric(D_pred %*% par_hat$beta)
+    }
   } else {
-    comb_pred <- predictors
-    ind_c <- complete.cases(comb_pred)
-    predictors_aux <- data.frame(na.omit(comb_pred))
-    colnames(predictors_aux) <- colnames(predictors)
-    predictors <- predictors_aux
+    grp <- st_coordinates(object$grid_pred)
+    n_pred <- nrow(grp)
+
+    if (!is.data.frame(predictors)) stop("'predictors' must be an object of class 'data.frame'")
+    if (nrow(predictors) != n_pred) stop("the values provided for 'predictors' do not match the prediction grid")
+
+    if (any(is.na(predictors))) {
+      warning("There are missing values in 'predictors'; these values have been removed alongside the corresponding prediction locations")
+    }
+
+    if (!is.null(object$re_predictors)) {
+      comb_pred <- data.frame(predictors, object$re_predictors)
+      ind_c <- complete.cases(comb_pred)
+      predictors <- predictors[ind_c, , drop = FALSE]
+      object$re_predictors <- object$re_predictors[ind_c, , drop = FALSE]
+
+      n_re <- length(object$re$samples)
+      for (i in 1:n_re) {
+        object$re$D_pred[[i]] <- object$re$D_pred[[i]][ind_c, , drop = FALSE]
+      }
+    } else {
+      comb_pred <- predictors
+      ind_c <- complete.cases(comb_pred)
+      predictors <- predictors[ind_c, , drop = FALSE]
+    }
+
+    object$grid_pred <- object$grid_pred[ind_c, ]
+    grp <- st_coordinates(object$grid_pred)
+    n_pred <- nrow(grp)
+    object$S_samples <- object$S_samples[ind_c, , drop = FALSE]
+
+    mf_pred <- model.frame(inter_lt_f$pf, data = predictors, na.action = na.fail)
+    D_pred <- as.matrix(model.matrix(attr(mf_pred, "terms"), data = predictors))
+    if (ncol(D_pred) != p) stop("Mismatch in number of predictors")
+    object$mu_pred <- as.numeric(D_pred %*% par_hat$beta)
   }
 
-  grid_pred_aux <- st_coordinates(object$grid_pred)[ind_c,]
-  object$grid_pred <- st_as_sf(data.frame(grid_pred_aux),
-                               coords = c("X","Y"),
-                               crs = st_crs(object$grid_pred)$input)
-  grp <- st_coordinates(object$grid_pred)
-  n_pred <- nrow(grp)
-  object$S_samples <- object$S_samples[ind_c,]
-
-  mf_pred <- model.frame(inter_lt_f$pf,data=predictors, na.action = na.fail)
-  D_pred <- as.matrix(model.matrix(attr(mf_pred,"terms"),data=predictors))
-  if(ncol(D_pred)!=p) stop("the provided variables in 'predictors' do not match the number of explanatory variables used to fit the model.")
-  mu_pred <- as.numeric(D_pred%*%par_hat$beta)
-
-  object$mu_pred <- mu_pred
-  out <- object
-  class(out) <- "RiskMap.pred.re"
-  return(out)
+  class(object) <- "RiskMap.pred.re"
+  return(object)
 }
+
+
 
 ##' @title Assess Predictive Performance via Spatial Cross-Validation
 ##'

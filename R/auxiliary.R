@@ -1267,86 +1267,183 @@ plot_score <- function(object, which_score, which_model, ...) {
 
 ##' @title Plot the estimated MDA impact function
 ##'
-##' @description This function generates a plot of the estimated mass drug administration (MDA) impact function
-##' based on a fitted decay-adjusted spatio-temporal (DAST) model.
+##' @description
+##' Generate a plot of the estimated impact of mass drug administration (MDA)
+##' on infection prevalence, based on a fitted decay-adjusted spatio-temporal (DAST) model.
+##' The function simulates draws from the posterior distribution of model parameters,
+##' propagates them through the MDA effect function, and produces uncertainty bands
+##' around the estimated impact curve.
 ##'
-##' @param object A fitted DAST model object, obtained as an output from the function \code{\link{dast}}.
-##' @param n_sim Number of posterior samples to simulate (default: 10000).
-##' @param x_min Minimum value for the x-axis (default: 1 year).
-##' @param x_max Maximum value for the x-axis (default: 10 years).
-##' @param conf_level Confidence level for the uncertainty interval (default: 0.95).
-##' @param lower_f Optional lower bound for the y-axis.
-##' @param upper_f Optional upper bound for the y-axis.
+##' @param object A fitted DAST model object, returned by \code{\link{dast}}.
+##' @param mda_history Specification of the MDA schedule. This can be either:
+##'   \itemize{
+##'     \item A numeric vector of event times (integers starting at 0, e.g. \code{c(0,1,2,6)}),
+##'     \item OR a 0/1 indicator vector on the yearly grid (e.g. \code{c(1,1,1,0,0,0,1)}),
+##'     where position \code{i} corresponds to year \code{i-1}.
+##'   }
+##'   If omitted, the default is a single MDA at time 0.
+##' @param n_sim Number of posterior draws used for uncertainty quantification (default: 1000).
+##' @param x_min Minimum value for the x-axis (default: \code{1e-6}).
+##' @param x_max Maximum value for the x-axis (default: \code{10}).
+##' @param conf_level Confidence level for the pointwise uncertainty interval (default: 0.95).
+##' @param lower_f Optional lower bound for the y-axis. If not provided, computed from the data.
+##' @param upper_f Optional upper bound for the y-axis. If not provided, computed from the data.
+##' @param mc_cores Number of CPU cores to use for parallel simulation. Default is 1 (serial).
+##' @param parallel_backend Parallelisation backend to use. Options are \code{"none"} (default),
+##'   \code{"fork"} (Unix-like systems), or \code{"psock"} (cross-platform).
 ##' @param ... Additional arguments (currently unused).
 ##'
-##' @return A ggplot2 object visualizing the MDA impact function, showing the median and confidence interval of the estimated function.
+##' @details
+##' The time axis is assumed to start at 0 and increase in integer steps of 1 year.
+##' The argument \code{mda_history} allows the user to specify when MDAs occurred either
+##' by listing the years directly or by giving a binary indicator on the yearly grid.
+##' The function then evaluates the cumulative relative reduction
+##' \eqn{1 - \mathrm{effect}(t)} at a dense grid of time points between \code{x_min}
+##' and \code{x_max}, using the fitted parameters from the supplied DAST model.
+##'
+##' @return
+##' A \code{ggplot2} object showing the median estimated MDA impact function
+##' and the pointwise uncertainty band at the chosen confidence level.
 ##'
 ##' @importFrom ggplot2 coord_cartesian geom_ribbon geom_line
 ##' @export
-plot_mda <- function(object, n_sim = 10000, x_min = 1, x_max = 10, conf_level = 0.95,
-                     lower_f = NULL, upper_f = NULL, ...) {
+plot_mda <- function(object,
+                     mda_history  = NULL,   # numeric event times (integers, starting at 0) OR 0/1 vector on yearly grid
+                     n_sim        = 1000,
+                     x_min        = 1e-6,
+                     x_max        = 10,
+                     conf_level   = 0.95,
+                     lower_f      = NULL,
+                     upper_f      = NULL,
+                     mc_cores     = 1,      # safe default: serial
+                     parallel_backend = c("none","fork","psock"),
+                     ...) {
 
-  .data <- NULL
-  # Extract parameter estimates
-  par_hat <- coef(object)
-  n_par <- length(object$estimate)
+  parallel_backend <- match.arg(parallel_backend)
 
-  if (is.null(par_hat$alpha)) {
-    ind_dast <- n_par
-    par_dast <- log(par_hat$gamma)
+  # --- Time axis for evaluation (smooth curve), but MDA grid is YEARLY from 0 ---
+  stopifnot(is.numeric(x_min), is.numeric(x_max), x_max > x_min)
+  survey_times <- seq(x_min, x_max, length.out = 200)  # evaluation grid for the curve
+  n_t <- length(survey_times)
+
+  # --- MDA schedule (assumed on yearly integer grid: 0,1,2,...) ---
+  if (is.null(mda_history)) {
+    # Default: single MDA at time 0
+    mda_times <- 0
+  } else if (is.numeric(mda_history) && all(mda_history %in% c(0,1))) {
+    # Indicator vector on the yearly grid: position i -> time (i-1)
+    if (length(mda_history) == 0L) {
+      mda_times <- numeric(0)
+    } else {
+      mda_times <- which(mda_history == 1) - 1
+    }
+  } else if (is.numeric(mda_history)) {
+    # Event times given directly (assumed integers on the yearly grid starting at 0)
+    mda_times <- sort(unique(as.numeric(mda_history)))
   } else {
-    ind_dast <- (n_par-1):n_par
-    par_dast <- c(log(par_hat$alpha / (1 - par_hat$alpha)), log(par_hat$gamma))
+    stop("`mda_history` must be numeric: either integer event times (0,1,2,...) or a 0/1 vector on that yearly grid.")
   }
 
-  # Generate parameter samples
-  Sigma_par <- as.matrix(object$covariance[ind_dast, ind_dast])
-  Sigma_par_sroot <- t(chol(Sigma_par))
-  par_hat_sim <- t(sapply(1:n_sim, function(i) par_dast + Sigma_par_sroot %*% rnorm(length(ind_dast))))
-  par_hat_sim <- as.matrix(par_hat_sim)
-
+  # --- Extract params from fitted object ---
+  par_hat   <- coef(object)
+  n_par     <- length(object$estimate)
   power_val <- object$power_val
 
-  # Define MDA impact function
-  f <- function(x, alpha, gamma, kappa) {
-    alpha * exp(-(x / gamma)^kappa)
+  if (is.null(par_hat$alpha)) {
+    ind_dast    <- n_par
+    par_dast    <- log(par_hat$gamma)
+    alpha_fixed <- object$fix_alpha
+    has_alpha   <- FALSE
+  } else {
+    ind_dast    <- (n_par - 1):n_par
+    par_dast    <- c(log(par_hat$alpha / (1 - par_hat$alpha)),
+                     log(par_hat$gamma))
+    alpha_fixed <- NA_real_
+    has_alpha   <- TRUE
   }
 
-  # Generate x-axis values using x_min and x_max
-  x_vals <- seq(x_min, x_max, length.out = 100)
+  Sigma_par       <- as.matrix(object$covariance[ind_dast, ind_dast])
+  Sigma_par_sroot <- t(chol(Sigma_par))
+  par_hat_sim <- t(vapply(
+    X   = seq_len(n_sim),
+    FUN = function(i) par_dast + Sigma_par_sroot %*% stats::rnorm(length(ind_dast)),
+    FUN.VALUE = numeric(length(ind_dast))
+  ))
 
-  # Compute median and confidence intervals
-  f_vals <- apply(par_hat_sim, 1, function(params) {
-    if(!is.null(par_hat$alpha)) {
-      alpha <- exp(params[1]) / (1 + exp(params[1]))
-      gamma <- exp(params[2])
-    } else {
-      alpha <- object$fix_alpha
-      gamma <- exp(params[1])
+  alphas <- if (has_alpha) plogis(par_hat_sim[, 1]) else rep(alpha_fixed, n_sim)
+  gammas <- if (has_alpha) exp(par_hat_sim[, 2]) else exp(par_hat_sim[, 1])
+
+  # --- Build intervention & simulate through compute_mda_effect ---
+  if (length(mda_times) == 0L) {
+    effects_mat <- matrix(0, nrow = n_t, ncol = n_sim)
+  } else {
+    # One column per MDA event; one row per evaluation time
+    intervention_mat <- matrix(1, nrow = n_t, ncol = length(mda_times))
+
+    one_sim <- function(j) {
+      eff <- compute_mda_effect(
+        survey_times_data = survey_times,
+        mda_times         = mda_times,
+        intervention      = intervention_mat,
+        alpha             = alphas[j],
+        gamma             = gammas[j],
+        kappa             = power_val
+      )
+      1 - eff  # cumulative relative reduction
     }
-    sapply(x_vals, function(x) f(x, alpha, gamma, power_val))
-  })
 
-  median_f <- apply(f_vals, 1, median)
-  lower_q <- apply(f_vals, 1, function(x) quantile(x, probs = (1 - conf_level) / 2))
-  upper_q <- apply(f_vals, 1, function(x) quantile(x, probs = 1 - (1 - conf_level) / 2))
+    # ---- EXECUTION BACKENDS ----
+    if (parallel_backend == "none" || mc_cores <= 1L) {
+      eff_list <- lapply(seq_len(n_sim), one_sim)
 
-  if(is.null(lower_f)) lower_f <- min(lower_q)
-  if(is.null(upper_f)) upper_f <- max(upper_q)
+    } else if (parallel_backend == "fork" && .Platform$OS.type == "unix") {
+      mc_cores <- as.integer(max(1L, min(mc_cores, parallel::detectCores(logical = TRUE) - 1L, n_sim)))
+      eff_list <- parallel::mclapply(seq_len(n_sim), one_sim,
+                                     mc.cores = mc_cores, mc.preschedule = TRUE)
 
-  # Create a single data frame with ribbon bounds
+    } else if (parallel_backend == "psock") {
+      mc_cores <- as.integer(max(1L, min(mc_cores, parallel::detectCores(logical = TRUE), n_sim)))
+      cl <- parallel::makeCluster(mc_cores, type = "PSOCK")
+      on.exit(try(parallel::stopCluster(cl), silent = TRUE), add = TRUE)
+      parallel::clusterExport(cl,
+                              varlist = c("survey_times","mda_times","intervention_mat","alphas","gammas","power_val","one_sim"),
+                              envir = environment())
+      eff_list <- parallel::parLapply(cl, seq_len(n_sim), one_sim)
+
+    } else {
+      eff_list <- lapply(seq_len(n_sim), one_sim)
+    }
+
+    effects_mat <- do.call(cbind, eff_list)
+  }
+
+  # --- Summaries & limits that respect x_min/x_max ---
+  alpha_q <- (1 - conf_level) / 2
+  med   <- apply(effects_mat, 1, stats::median,   na.rm = TRUE)
+  lower <- apply(effects_mat, 1, stats::quantile, probs = alpha_q, na.rm = TRUE)
+  upper <- apply(effects_mat, 1, stats::quantile, probs = 1 - alpha_q, na.rm = TRUE)
+
+  in_view <- survey_times >= x_min & survey_times <= x_max
+  if (!any(in_view)) in_view <- rep(TRUE, length(survey_times))
+
+  if (is.null(lower_f)) lower_f <- min(lower[in_view], na.rm = TRUE)
+  if (is.null(upper_f)) upper_f <- max(upper[in_view], na.rm = TRUE)
+
   plot_data <- data.frame(
-    x = x_vals,
-    median = median_f,
-    lower = lower_q,
-    upper = upper_q
+    time   = survey_times,
+    median = med,
+    lower  = lower,
+    upper  = upper
   )
 
-  # Plot with clean styling: no legend, single color for median line, grey ribbon
-  ggplot(plot_data, aes(x = .data$x)) +
-    geom_ribbon(aes(ymin = .data$lower, ymax = .data$upper), fill = "grey70", alpha = 0.3) +
-    geom_line(aes(y = median), color = "black", linewidth = 1) +
-    labs(x = "Years since MDA", y = "Prevalence Relative Reduction", title = "MDA Impact Function") +
-    coord_cartesian(xlim = c(x_min, x_max), ylim = c(lower_f, upper_f)) +
-    theme_minimal()
+  ggplot2::ggplot(plot_data, ggplot2::aes(x = time)) +
+    ggplot2::geom_ribbon(ggplot2::aes(ymin = lower, ymax = upper), fill = "grey70", alpha = 0.3) +
+    ggplot2::geom_line(ggplot2::aes(y = median), color = "black", linewidth = 1) +
+    ggplot2::labs(
+      x = "Years since baseline",
+      y = "Relative reduction in prevalence",
+      title = "MDA Impact Over Time"
+    ) +
+    ggplot2::coord_cartesian(xlim = c(x_min, x_max), ylim = c(lower_f, upper_f)) +
+    ggplot2::theme_minimal()
 }
