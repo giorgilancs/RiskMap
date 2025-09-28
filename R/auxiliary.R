@@ -1315,36 +1315,33 @@ plot_mda <- function(object,
                      conf_level   = 0.95,
                      lower_f      = NULL,
                      upper_f      = NULL,
-                     mc_cores     = 1,      # safe default: serial
+                     mc_cores     = 1,
                      parallel_backend = c("none","fork","psock"),
                      ...) {
 
   parallel_backend <- match.arg(parallel_backend)
 
-  # --- Time axis for evaluation (smooth curve), but MDA grid is YEARLY from 0 ---
+  # --- Time axis for evaluation ---
   stopifnot(is.numeric(x_min), is.numeric(x_max), x_max > x_min)
-  survey_times <- seq(x_min, x_max, length.out = 200)  # evaluation grid for the curve
+  survey_times <- seq(x_min, x_max, length.out = 200)
   n_t <- length(survey_times)
 
-  # --- MDA schedule (assumed on yearly integer grid: 0,1,2,...) ---
+  # --- MDA schedule ---
   if (is.null(mda_history)) {
-    # Default: single MDA at time 0
     mda_times <- 0
   } else if (is.numeric(mda_history) && all(mda_history %in% c(0,1))) {
-    # Indicator vector on the yearly grid: position i -> time (i-1)
     if (length(mda_history) == 0L) {
       mda_times <- numeric(0)
     } else {
       mda_times <- which(mda_history == 1) - 1
     }
   } else if (is.numeric(mda_history)) {
-    # Event times given directly (assumed integers on the yearly grid starting at 0)
     mda_times <- sort(unique(as.numeric(mda_history)))
   } else {
     stop("`mda_history` must be numeric: either integer event times (0,1,2,...) or a 0/1 vector on that yearly grid.")
   }
 
-  # --- Extract params from fitted object ---
+  # --- Extract params ---
   par_hat   <- coef(object)
   n_par     <- length(object$estimate)
   power_val <- object$power_val
@@ -1373,11 +1370,10 @@ plot_mda <- function(object,
   alphas <- if (has_alpha) plogis(par_hat_sim[, 1]) else rep(alpha_fixed, n_sim)
   gammas <- if (has_alpha) exp(par_hat_sim[, 2]) else exp(par_hat_sim[, 1])
 
-  # --- Build intervention & simulate through compute_mda_effect ---
+  # --- Simulate effects ---
   if (length(mda_times) == 0L) {
     effects_mat <- matrix(0, nrow = n_t, ncol = n_sim)
   } else {
-    # One column per MDA event; one row per evaluation time
     intervention_mat <- matrix(1, nrow = n_t, ncol = length(mda_times))
 
     one_sim <- function(j) {
@@ -1389,18 +1385,15 @@ plot_mda <- function(object,
         gamma             = gammas[j],
         kappa             = power_val
       )
-      1 - eff  # cumulative relative reduction
+      1 - eff
     }
 
-    # ---- EXECUTION BACKENDS ----
     if (parallel_backend == "none" || mc_cores <= 1L) {
       eff_list <- lapply(seq_len(n_sim), one_sim)
-
     } else if (parallel_backend == "fork" && .Platform$OS.type == "unix") {
       mc_cores <- as.integer(max(1L, min(mc_cores, parallel::detectCores(logical = TRUE) - 1L, n_sim)))
       eff_list <- parallel::mclapply(seq_len(n_sim), one_sim,
                                      mc.cores = mc_cores, mc.preschedule = TRUE)
-
     } else if (parallel_backend == "psock") {
       mc_cores <- as.integer(max(1L, min(mc_cores, parallel::detectCores(logical = TRUE), n_sim)))
       cl <- parallel::makeCluster(mc_cores, type = "PSOCK")
@@ -1409,7 +1402,6 @@ plot_mda <- function(object,
                               varlist = c("survey_times","mda_times","intervention_mat","alphas","gammas","power_val","one_sim"),
                               envir = environment())
       eff_list <- parallel::parLapply(cl, seq_len(n_sim), one_sim)
-
     } else {
       eff_list <- lapply(seq_len(n_sim), one_sim)
     }
@@ -1417,7 +1409,7 @@ plot_mda <- function(object,
     effects_mat <- do.call(cbind, eff_list)
   }
 
-  # --- Summaries & limits that respect x_min/x_max ---
+  # --- Summaries ---
   alpha_q <- (1 - conf_level) / 2
   med   <- apply(effects_mat, 1, stats::median,   na.rm = TRUE)
   lower <- apply(effects_mat, 1, stats::quantile, probs = alpha_q, na.rm = TRUE)
@@ -1436,14 +1428,24 @@ plot_mda <- function(object,
     upper  = upper
   )
 
-  ggplot2::ggplot(plot_data, ggplot2::aes(x = time)) +
-    ggplot2::geom_ribbon(ggplot2::aes(ymin = lower, ymax = upper), fill = "grey70", alpha = 0.3) +
-    ggplot2::geom_line(ggplot2::aes(y = median), color = "black", linewidth = 1) +
+  p <- ggplot2::ggplot(plot_data, ggplot2::aes(x = time)) +
+    ggplot2::geom_ribbon(ggplot2::aes(ymin = lower, ymax = upper),
+                         fill = "grey70", alpha = 0.3) +
+    ggplot2::geom_line(ggplot2::aes(y = median),
+                       color = "black", linewidth = 1) +
     ggplot2::labs(
       x = "Years since baseline",
-      y = "Relative reduction in prevalence",
+      y = "Relative reduction from baseline prevalence",
       title = "MDA Impact Over Time"
     ) +
     ggplot2::coord_cartesian(xlim = c(x_min, x_max), ylim = c(lower_f, upper_f)) +
     ggplot2::theme_minimal()
+
+  # --- Add vertical dashed lines for MDA times ---
+  if (length(mda_times) > 0) {
+    p <- p + ggplot2::geom_vline(xintercept = mda_times,
+                                 linetype = "dashed", color = "red", alpha = 0.7)
+  }
+
+  return(p)
 }
