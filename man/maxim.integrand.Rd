@@ -38,6 +38,8 @@ maxim.integrand(
 \item{hessian}{Logical; if TRUE, compute the Hessian matrix.}
 
 \item{gradient}{Logical; if TRUE, compute the gradient vector.}
+
+\item{invlink}{A function that defines the inverse of the link function for the distribution of the data given the random effects.}
 }
 \value{
 A list containing the mode estimate, and optionally, the Hessian matrix and gradient vector.

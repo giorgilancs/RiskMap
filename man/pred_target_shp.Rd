@@ -2,7 +2,7 @@
 % Please edit documentation in R/spatial_prediction.R
 \name{pred_target_shp}
 \alias{pred_target_shp}
-\title{Predictive Target over a Shapefile}
+\title{Predictive Targets over a Shapefile (grid-aggregated)}
 \usage{
 pred_target_shp(
   object,
@@ -21,59 +21,84 @@ pred_target_shp(
   include_re = FALSE,
   f_target = NULL,
   pd_summary = NULL,
-  messages = TRUE
+  messages = TRUE,
+  return_target_samples = FALSE
 )
 }
 \arguments{
-\item{object}{Output from `pred_over_grid`, a RiskMap.pred.re object.}
+\item{object}{Output from \code{\link{pred_over_grid}} (class \code{RiskMap.pred.re}),
+typically fitted with \code{type = "joint"} so that linear predictor samples are available.}
 
-\item{shp}{Spatial dataset (sf or data.frame) representing the shapefile over which predictions are computed.}
+\item{shp}{An \pkg{sf} polygon object (preferred) or a \code{data.frame} with an
+attached geometry column, representing regions over which predictions are aggregated.}
 
-\item{shp_target}{Function defining the aggregation method for shapefile targets (default is mean).}
+\item{shp_target}{A function that aggregates grid-cell values within each polygon to a
+single regional value (default \code{mean}). Examples: \code{mean}, \code{sum},
+a custom weighted mean, etc.}
 
-\item{weights}{Optional numeric vector of weights for spatial predictions.}
+\item{weights}{Optional numeric vector of weights used inside \code{shp_target}.
+If supplied with \code{standardize_weights = TRUE}, weights are normalized within each region.}
 
-\item{standardize_weights}{Logical indicating whether to standardize weights (default is FALSE).}
+\item{standardize_weights}{Logical; standardize \code{weights} within each region (\code{FALSE} by default).}
 
-\item{col_names}{Column name or index in 'shp' containing region names.}
+\item{col_names}{Name or column index in \code{shp} containing region identifiers to use in outputs.}
 
-\item{include_covariates}{Logical indicating whether to include covariates in predictions (default is TRUE).}
+\item{include_covariates}{Logical; include fitted covariate effects in the linear predictor (default \code{TRUE}).}
 
-\item{include_nugget}{Logical indicating whether to include the nugget effect (default is FALSE).}
+\item{include_nugget}{Logical; include the nugget (unstructured measurement error) in the linear predictor (default \code{FALSE}).}
 
-\item{include_cov_offset}{Logical indicating whether to include covariate offset in predictions (default is FALSE).}
+\item{include_cov_offset}{Logical; include any covariate offset term (default \code{FALSE}).}
 
-\item{include_mda_effect}{Logical indicating whether to include the mass drug administration (MDA) effect as defined by the fitted DAST model (default is TRUE).}
+\item{include_mda_effect}{Logical; include the MDA effect as defined by the fitted DAST model
+(default \code{TRUE}). Requires \code{time_pred} and, when applicable, \code{mda_grid}.}
 
-\item{return_shp}{Logical indicating whether to return the shape file with the added predictive distribution summaries as defined through \code{pd_summary}.}
+\item{return_shp}{Logical; if \code{TRUE}, return the shapefile with appended summary columns
+defined by \code{pd_summary} (default \code{TRUE}).}
 
-\item{include_re}{Logical indicating whether to include random effects in predictions (default is FALSE).}
+\item{time_pred}{Optional numeric scalar (or time index) at which to evaluate the predictive target}
 
-\item{f_target}{List of target functions to apply to the linear predictor samples.}
+\item{mda_grid}{Optional structure describing MDA schedules aligned with prediction grid cells
+(e.g., a \code{data.frame}/matrix/list). Used only when \code{include_mda_effect = TRUE}.}
 
-\item{pd_summary}{List of summary functions (e.g., mean, sd) to summarize target samples.}
+\item{include_re}{Logical; include unstructured random effects (RE) in the linear predictor (default \code{FALSE}).}
+
+\item{f_target}{List of target functions applied to linear predictor samples (e.g.,
+\code{list(prev = plogis)} for prevalence on the probability scale). If \code{NULL},
+the identity is used.}
+
+\item{pd_summary}{Named list of summary functions applied to each region's target samples
+(e.g., \code{list(mean = mean, sd = sd, q025 = function(x) quantile(x, 0.025), q975 = function(x) quantile(x, 0.975))}).
+Names are used as column suffixes in the outputs.}
+
+\item{messages}{Logical; if \code{TRUE}, print progress messages while computing regional targets.}
+
+\item{return_target_samples}{Logical; if \code{TRUE}, also return the raw target samples per region
+(default \code{FALSE}).}
 }
 \value{
-An object of class 'RiskMap_pred_target_shp' containing computed targets,
-summaries, and associated spatial data.
+An object of class \code{RiskMap_pred_target_shp} with components:
+\itemize{
+  \item \code{target}: \code{data.frame} of region-level summaries (one row per region).
+  \item \code{target_samples}: (optional) \code{list} with one element per region; each contains
+        a \code{data.frame}/matrix of raw samples for each named target in \code{f_target},
+        if \code{return_target_samples = TRUE}.
+  \item \code{shp}: (optional) the input \code{sf} object with appended summary columns,
+        included if \code{return_shp = TRUE}.
+  \item \code{f_target}, \code{pd_summary}, \code{grid_pred}: inputs echoed for reproducibility.
+}
 }
 \description{
-Computes predictions over a shapefile using outputs from the
-\code{\link{pred_over_grid}} function.
-This function allows for incorporating covariates, offsets, and optional
-unstructured random effects into the predictive target.
+Computes predictive targets over polygon features using joint prediction
+samples from \code{\link{pred_over_grid}}. Targets can incorporate
+covariates, offsets, optional unstructured random effects, and (if fitted)
+mass drug administration (MDA) effects from a DAST model.
 }
 \details{
-This function computes predictive targets or summaries over a spatial shapefile
-using outputs from 'pred_S'. It requires the 'terra' package for spatial data
-manipulation and should be used with 'sf' or 'data.frame' objects representing
-the shapefile.
+For each polygon in \code{shp}, grid-cell samples of the linear predictor are transformed with
+\code{f_target}, optionally adjusted for covariates, offset, nugget, MDA effects and/or REs, and
+then aggregated via \code{shp_target} (optionally weighted). The list \code{pd_summary} is applied
+to each region's target samples to produce summary statistics.
 }
 \seealso{
-\code{\link{pred_target_grid}}
-}
-\author{
-Emanuele Giorgi \email{e.giorgi@lancaster.ac.uk}
-
-Claudio Fronterre \email{c.fronterr@lancaster.ac.uk}
+\code{\link{pred_over_grid}}, \code{\link{pred_target_grid}}
 }

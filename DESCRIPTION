@@ -1,24 +1,44 @@
 Package: RiskMap
 Type: Package
-Title: Geo-Statistical Modeling of Spatially Referenced Data
+Title: Geostatistical Modeling of Spatially Referenced Data
 Version: 1.0.0
 Authors@R: 
   c(person(given = "Emanuele",
            family = "Giorgi",
            role = c("aut", "cre"),
-           email = "e.giorgi@lancaster.ac.uk",
+           email = "e.giorgi@bham.ac.uk",
            comment = c(ORCID = "0000-0003-0640-181X")),
     person(given = "Claudio",
            family = "Fronterre",
            role = "ctb",
-           email = "c.fronterr@lancaster.ac.uk",           
+           email = "c.fronterre@bham.ac.uk",
            comment = c(ORCID = "0000-0001-6723-9727")))
-Description: Provides functions for geo-statistical analysis of both continuous and count data using maximum likelihood methods. The models implemented in the package use stationary Gaussian processes with Matern correlation function to carry out spatial prediction in a geographical area of interest. The underpinning theory of the methods implemented in the package are found in Diggle and Giorgi (2019, ISBN: 978-1-138-06102-7).
+Description: Geostatistical analysis of continuous and count data.
+  Implements stationary Gaussian processes with Matérn correlation for spatial prediction,
+  as described in Diggle and Giorgi (2019, ISBN: 978-1-138-06102-7).
 License: MIT + file LICENSE
+URL: https://claudiofronterre.github.io/RiskMap/
 Encoding: UTF-8
 LazyData: true
 RoxygenNote: 7.3.2
-URL: https://claudiofronterre.github.io/RiskMap/
-Imports: sf, stats, methods, ggplot2, Matrix, terra, xtable, sns, graphics, spatialEco, spatialsample, gridExtra, ggpubr, dplyr, stars
 Depends:
-    R (>= 2.10)
+    R (>= 3.5.0)
+Imports:
+    stats,
+    methods,
+    Matrix,
+    terra,
+    xtable,
+    graphics,
+    spatialEco,
+    spatialsample,
+    Deriv,
+    numDeriv,
+    dplyr,
+    ggplot2,
+    ggpubr,
+    gridExtra,
+    sf,
+    sns,
+    stars
+

@@ -1,8 +1,3 @@
-##' @importFrom utils flush.console
-##' @importFrom graphics points
-##' @importFrom sf st_nearest_feature
-
-
 ##' @title Estimation of Generalized Linear Gaussian Process Models
 ##' @description Fits generalized linear Gaussian process models to spatial data, incorporating spatial Gaussian processes with a Matern correlation function. Supports Gaussian, binomial, and Poisson response families.
 ##' @param formula A formula object specifying the model to be fitted. The formula should include fixed effects, random effects (specified using \code{re()}), and spatial effects (specified using \code{gp()}).
@@ -1604,6 +1599,7 @@ glgpm_sim <- function(n_sim,
 ##' @param sigma2_re Variance of the unstructured random effects.
 ##' @param hessian Logical; if TRUE, compute the Hessian matrix.
 ##' @param gradient Logical; if TRUE, compute the gradient vector.
+##' @param invlink A function that defines the inverse of the link function for the distribution of the data given the random effects.
 ##'
 ##' @details
 ##' This function maximizes the integrand for GLGPMs using the Nelder-Mead optimization algorithm. It computes the likelihood function incorporating spatial covariance and unstructured random effects, if provided.
@@ -1878,47 +1874,85 @@ maxim.integrand <- function(
   out
 }
 
-
-
-##' Laplace Sampling Markov Chain Monte Carlo (MCMC) for Generalized Linear Gaussian Process Models
+##' @title Laplace-sampling MCMC for Generalized Linear Gaussian Process Models
 ##'
-##' Performs MCMC sampling using Laplace approximation for Generalized Linear Gaussian Process Models (GLGPMs).
+##' @description
+##' Runs Markov chain Monte Carlo (MCMC) sampling using a Laplace
+##' approximation for Generalized Linear Gaussian Process Models (GLGPMs).
+##' The latent Gaussian field is integrated via a second-order Taylor
+##' expansion around the mode, and a Gaussian proposal is used for
+##' Metropolis–Hastings updates with adaptive step-size tuning.
 ##'
-##' @param y Response variable vector.
-##' @param units_m Units of measurement for the response variable.
-##' @param mu Mean vector of the response variable.
-##' @param Sigma Covariance matrix of the spatial process.
-##' @param ID_coords Indices mapping response to locations.
-##' @param ID_re Indices mapping response to unstructured random effects.
-##' @param sigma2_re Variance of the unstructured random effects.
-##' @param family Distribution family for the response variable. Must be one of 'gaussian', 'binomial', or 'poisson'.
-##' @param control_mcmc List with control parameters for the MCMC algorithm:
+##' @param y Numeric vector of responses of length \eqn{n}.
+##'   For \code{family = "binomial"} this is the number of successes,
+##'   for \code{family = "poisson"} counts, and for \code{family = "gaussian"} real values.
+##' @param units_m Numeric vector giving the binomial totals (number of trials)
+##'   when \code{family = "binomial"}; ignored for other families (can be \code{NULL}).
+##' @param mu Numeric vector of length equal to the number of unique locations
+##'   providing the mean of the latent spatial process on the link scale.
+##' @param Sigma Numeric positive-definite covariance matrix for the latent spatial
+##'   process \eqn{S} at the unique locations referenced by \code{ID_coords}.
+##' @param ID_coords Integer vector of length \eqn{n} mapping each response in
+##'   \code{y} to a row/column of \code{Sigma} (i.e., the index of the corresponding location).
+##' @param ID_re Optional matrix or data.frame with one column per unstructured
+##'   random effect (RE). Each column is an integer vector of length \eqn{n}
+##'   mapping observations in \code{y} to RE levels (e.g., cluster, survey, etc.).
+##'   Use \code{NULL} to exclude REs.
+##' @param sigma2_re Optional named numeric vector of RE variances. Names must
+##'   match the column names of \code{ID_re}. Ignored if \code{ID_re = NULL}.
+##' @param family Character string: one of \code{"gaussian"}, \code{"binomial"},
+##'   or \code{"poisson"}.
+##' @param control_mcmc List of control parameters:
 ##'   \describe{
-##'     \item{n_sim}{Number of MCMC iterations.}
-##'     \item{burnin}{Number of burn-in iterations.}
-##'     \item{thin}{Thinning parameter for saving samples.}
-##'     \item{h}{Step size for proposal distribution. Defaults to 1.65/(n_tot^(1/6)).}
-##'     \item{c1.h, c2.h}{Parameters for adaptive step size tuning.}
+##'     \item{n_sim}{Total number of MCMC iterations (including burn-in).}
+##'     \item{burnin}{Number of initial iterations to discard.}
+##'     \item{thin}{Thinning interval for saving samples.}
+##'     \item{h}{Initial step size for the Gaussian proposal. Defaults to \eqn{1.65 / n_\mathrm{tot}^{1/6}} if not supplied.}
+##'     \item{c1.h, c2.h}{Positive tuning constants for adaptive step-size updates.}
 ##'   }
-##' @param Sigma_pd Precision matrix (optional) for Laplace approximation.
-##' @param mean_pd Mean vector (optional) for Laplace approximation.
-##' @param messages Logical; if TRUE, print progress messages.
+##' @param invlink Optional inverse-link function. If \code{NULL}, defaults are used:
+##'   \code{identity} (gaussian), \code{plogis} (binomial), and \code{exp} (poisson).
+##' @param Sigma_pd Optional precision matrix used in the Laplace approximation.
+##'   If \code{NULL}, it is obtained internally at the current mode.
+##' @param mean_pd Optional mean vector used in the Laplace approximation.
+##'   If \code{NULL}, it is obtained internally as the mode of the integrand.
+##' @param messages Logical; if \code{TRUE}, prints progress and acceptance diagnostics.
 ##'
 ##' @details
-##' This function implements a Laplace sampling MCMC approach for GLGPMs. It maximizes the integrand using `maxim.integrand` function for Laplace approximation if `Sigma_pd` and `mean_pd` are not provided.
+##' The algorithm alternates between:
+##' \enumerate{
+##'   \item Locating the mode of the joint integrand for the latent variables
+##'         (via \code{maxim.integrand}) when \code{Sigma_pd} and \code{mean_pd}
+##'         are not provided, yielding a Gaussian approximation.
+##'   \item Metropolis–Hastings updates using a Gaussian proposal centered at
+##'         the current approximate mean with proposal variance governed by \code{h}.
+##'         The step size is adapted based on empirical acceptance probability.
+##' }
 ##'
-##' The MCMC procedure involves adaptive step size adjustment based on the acceptance probability (`acc_prob`) and uses a Gaussian proposal distribution centered on the current mean (`mean_curr`) with variance `h`.
+##' Dimensions must be consistent:
+##' \code{length(y) = n}, \code{nrow(Sigma) = ncol(Sigma) = n_loc},
+##' and \code{length(ID_coords) = n} with entries in \eqn{1,\dots,n_\mathrm{loc}}.
+##' If \code{ID_re} is provided, each column must have length \eqn{n}; when
+##' \code{sigma2_re} is supplied, it must be named and match \code{colnames(ID_re)}.
 ##'
-##' @return An object of class "mcmc.RiskMap" containing:
-##'   \describe{
-##'     \item{samples$S}{Samples of the spatial process.}
-##'     \item{samples$<re_names[i]>}{Samples of each unstructured random effect, named according to columns of ID_re if provided.}
-##'     \item{tuning_par}{Vector of step size (h) values used during MCMC iterations.}
-##'     \item{acceptance_prob}{Vector of acceptance probabilities across MCMC iterations.}
-##'   }
+##' @return An object of class \code{"mcmc.RiskMap"} with components:
+##' \describe{
+##'   \item{samples}{A list containing posterior draws. Always includes
+##'                 \code{$S} (latent spatial field). If \code{ID_re} is supplied,
+##'                 each unstructured RE is returned under \code{$<re_name>}.}
+##'   \item{tuning_par}{Numeric vector of step sizes (\code{h}) used over iterations.}
+##'   \item{acceptance_prob}{Numeric vector of Metropolis–Hastings acceptance probabilities.}
+##' }
+##'
+##' @section Default links:
+##' The default inverse links are: identity (gaussian), logistic (binomial),
+##' and exponential (poisson). Supply \code{invlink} to override.
+##'
+##' @seealso \code{\link{maxim.integrand}}
+##'
 ##' @export
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @author Claudio Fronterre \email{c.fronterre@@lancaster.ac.uk}
 Laplace_sampling_MCMC <- function(y, units_m, mu, Sigma,
                                   ID_coords, ID_re = NULL,
                                   sigma2_re = NULL,

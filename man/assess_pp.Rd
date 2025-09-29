@@ -34,7 +34,7 @@ assess_pp(
 \item{control_sim}{Control settings for simulation, an output from `set_control_sim`.}
 
 \item{method}{Character; either `"cluster"` or `"regularized"` for the cross-validation method. The `"cluster"` method uses
-spatial clustering as implemented by the \code{\link{spatial_clustering_cv}} function from the `spatialEco` package, while the `"regularized"` method
+spatial clustering as implemented by the \code{spatial_clustering_cv} function from the `spatialEco` package, while the `"regularized"` method
 selects a subsample of the dataset by imposing a minimum distance, set by the `min_dist` argument, for a randomly selected
 subset of locations.}
 
@@ -84,7 +84,7 @@ Cross-validation can be performed using either spatial clustering or regularized
 Bolin, D., & Wallin, J. (2023). Local scale invariance and robustness of proper scoring rules. *Statistical Science*, 38(1), 140–159. \doi{10.1214/22-STS864}.
 }
 \seealso{
-\code{\link{spatial_clustering_cv}}, \code{\link{subsample.distance}}, \code{\link{plot_AnPIT}}
+\code{\link{plot_AnPIT}}
 }
 \author{
 Emanuele Giorgi

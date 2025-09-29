@@ -887,52 +887,69 @@ plot.RiskMap_pred_target_grid <- function(x, which_target = "linear_target", whi
   terra::plot(raster_out, ...)
 }
 
-
-##' Predictive Target over a Shapefile
+##' @title Predictive Targets over a Shapefile (grid-aggregated)
 ##'
-##' Computes predictions over a shapefile using outputs from the
-##' \code{\link{pred_over_grid}} function.
-##' This function allows for incorporating covariates, offsets, and optional
-##' unstructured random effects into the predictive target.
+##' @description
+##' Computes predictive targets over polygon features using joint prediction
+##' samples from \code{\link{pred_over_grid}}. Targets can incorporate
+##' covariates, offsets, optional unstructured random effects, and (if fitted)
+##' mass drug administration (MDA) effects from a DAST model.
 ##'
-##' @param object Output from `pred_over_grid`, a RiskMap.pred.re object.
-##' @param shp Spatial dataset (sf or data.frame) representing the shapefile over which predictions are computed.
-##' @param shp_target Function defining the aggregation method for shapefile targets (default is mean).
-##' @param weights Optional numeric vector of weights for spatial predictions.
-##' @param standardize_weights Logical indicating whether to standardize weights (default is FALSE).
-##' @param col_names Column name or index in 'shp' containing region names.
-##' @param include_covariates Logical indicating whether to include covariates in predictions (default is TRUE).
-##' @param include_nugget Logical indicating whether to include the nugget effect (default is FALSE).
-##' @param include_cov_offset Logical indicating whether to include covariate offset in predictions (default is FALSE).
-##' @param include_mda_effect Logical indicating whether to include the mass drug administration (MDA) effect as defined by the fitted DAST model (default is TRUE).
-##' @param return_shp Logical indicating whether to return the shape file with the added predictive distribution summaries as defined through \code{pd_summary}.
-##' @param include_re Logical indicating whether to include random effects in predictions (default is FALSE).
-##' @param f_target List of target functions to apply to the linear predictor samples.
-##' @param pd_summary List of summary functions (e.g., mean, sd) to summarize target samples.
-##' @param return_target_samples Logical indicating whether to return raw samples of the predictive targets for each region (default is FALSE).
+##' @param object Output from \code{\link{pred_over_grid}} (class \code{RiskMap.pred.re}),
+##'   typically fitted with \code{type = "joint"} so that linear predictor samples are available.
+##' @param shp An \pkg{sf} polygon object (preferred) or a \code{data.frame} with an
+##'   attached geometry column, representing regions over which predictions are aggregated.
+##' @param shp_target A function that aggregates grid-cell values within each polygon to a
+##'   single regional value (default \code{mean}). Examples: \code{mean}, \code{sum},
+##'   a custom weighted mean, etc.
+##' @param weights Optional numeric vector of weights used inside \code{shp_target}.
+##'   If supplied with \code{standardize_weights = TRUE}, weights are normalized within each region.
+##' @param standardize_weights Logical; standardize \code{weights} within each region (\code{FALSE} by default).
+##' @param col_names Name or column index in \code{shp} containing region identifiers to use in outputs.
+##' @param include_covariates Logical; include fitted covariate effects in the linear predictor (default \code{TRUE}).
+##' @param include_nugget Logical; include the nugget (unstructured measurement error) in the linear predictor (default \code{FALSE}).
+##' @param include_cov_offset Logical; include any covariate offset term (default \code{FALSE}).
+##' @param include_mda_effect Logical; include the MDA effect as defined by the fitted DAST model
+##'   (default \code{TRUE}). Requires \code{time_pred} and, when applicable, \code{mda_grid}.
+##' @param return_shp Logical; if \code{TRUE}, return the shapefile with appended summary columns
+##'   defined by \code{pd_summary} (default \code{TRUE}).
+##' @param time_pred Optional numeric scalar (or time index) at which to evaluate the predictive target
+##!'   when MDA effects are included. If \code{NULL}, uses the default time implied by \code{object}.
+##' @param mda_grid Optional structure describing MDA schedules aligned with prediction grid cells
+##'   (e.g., a \code{data.frame}/matrix/list). Used only when \code{include_mda_effect = TRUE}.
+##' @param include_re Logical; include unstructured random effects (RE) in the linear predictor (default \code{FALSE}).
+##' @param f_target List of target functions applied to linear predictor samples (e.g.,
+##'   \code{list(prev = plogis)} for prevalence on the probability scale). If \code{NULL},
+##'   the identity is used.
+##' @param pd_summary Named list of summary functions applied to each region's target samples
+##'   (e.g., \code{list(mean = mean, sd = sd, q025 = function(x) quantile(x, 0.025), q975 = function(x) quantile(x, 0.975))}).
+##'   Names are used as column suffixes in the outputs.
+##' @param messages Logical; if \code{TRUE}, print progress messages while computing regional targets.
+##' @param return_target_samples Logical; if \code{TRUE}, also return the raw target samples per region
+##'   (default \code{FALSE}).
 ##'
-##' @importFrom terra rast as.data.frame
-##' @export
 ##' @details
-##' This function computes predictive targets or summaries over a spatial shapefile
-##' using outputs from 'pred_S'. It requires the 'terra' package for spatial data
-##' manipulation and should be used with 'sf' or 'data.frame' objects representing
-##' the shapefile.
+##' For each polygon in \code{shp}, grid-cell samples of the linear predictor are transformed with
+##' \code{f_target}, optionally adjusted for covariates, offset, nugget, MDA effects and/or REs, and
+##' then aggregated via \code{shp_target} (optionally weighted). The list \code{pd_summary} is applied
+##' to each region's target samples to produce summary statistics.
 ##'
-##' @return An object of class 'RiskMap_pred_target_shp' containing:
+##' @return An object of class \code{RiskMap_pred_target_shp} with components:
 ##' \itemize{
-##'   \item \code{target} – summaries of predictive targets by region.
-##'   \item \code{target_samples} – raw samples of predictive targets (if \code{return_target_samples=TRUE}).
-##'   \item \code{shp} – spatial object with appended summary statistics.
-##'   \item \code{f_target}, \code{pd_summary}, \code{grid_pred}.
+##'   \item \code{target}: \code{data.frame} of region-level summaries (one row per region).
+##'   \item \code{target_samples}: (optional) \code{list} with one element per region; each contains
+##'         a \code{data.frame}/matrix of raw samples for each named target in \code{f_target},
+##'         if \code{return_target_samples = TRUE}.
+##'   \item \code{shp}: (optional) the input \code{sf} object with appended summary columns,
+##'         included if \code{return_shp = TRUE}.
+##'   \item \code{f_target}, \code{pd_summary}, \code{grid_pred}: inputs echoed for reproducibility.
 ##' }
 ##'
-##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
-##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
+##' @seealso \code{\link{pred_over_grid}}, \code{\link{pred_target_grid}}
 ##'
-##' @seealso
-##' \code{\link{pred_target_grid}}
-##'
+##' @importFrom terra rast as.data.frame
+##' @importFrom stats plogis
+##' @export
 pred_target_shp <- function(object, shp, shp_target = mean,
                             weights = NULL, standardize_weights = FALSE,
                             col_names = NULL,
@@ -1218,7 +1235,7 @@ pred_target_shp <- function(object, shp, shp_target = mean,
           mda_effect_time_pred <- compute_mda_effect(
             rep(time_pred, n_pred[h]),
             mda_times = object$mda_times,
-            int = mda_grid[[h]],
+            intervention = mda_grid[[h]],
             alpha = alpha, gamma = gamma, kappa = object$power_val
           )
           target_grid_samples_i <- target_grid_samples_i * mda_effect_time_pred
@@ -1261,7 +1278,7 @@ pred_target_shp <- function(object, shp, shp_target = mean,
             mda_effect_time_pred <- compute_mda_effect(
               rep(time_pred, length(ind_grid_h)),
               mda_times = object$mda_times,
-              int = mda_grid[ind_grid_h, ],
+              intervention = mda_grid[ind_grid_h, ],
               alpha = alpha, gamma = gamma, kappa = object$power_val
             )
             target_grid_samples_i <- target_grid_samples_i * mda_effect_time_pred
@@ -1500,7 +1517,7 @@ update_predictors <- function(object, predictors) {
 ##' @param n_size Optional; the size of the test set, required if `method = "regularized"`.
 ##' @param control_sim Control settings for simulation, an output from `set_control_sim`.
 ##' @param method Character; either `"cluster"` or `"regularized"` for the cross-validation method. The `"cluster"` method uses
-##' spatial clustering as implemented by the \code{\link{spatial_clustering_cv}} function from the `spatialEco` package, while the `"regularized"` method
+##' spatial clustering as implemented by the \code{spatial_clustering_cv} function from the `spatialEco` package, while the `"regularized"` method
 ##' selects a subsample of the dataset by imposing a minimum distance, set by the `min_dist` argument, for a randomly selected
 ##' subset of locations.
 ##' @param min_dist Optional; minimum distance for regularized subsampling (required if `method = "regularized"`).
@@ -1531,7 +1548,7 @@ update_predictors <- function(object, predictors) {
 ##'   }
 ##' }
 ##'
-##' @seealso \code{\link{spatial_clustering_cv}}, \code{\link{subsample.distance}}, \code{\link{plot_AnPIT}}
+##' @seealso \code{\link{plot_AnPIT}}
 ##'
 ##' @references
 ##' Bolin, D., & Wallin, J. (2023). Local scale invariance and robustness of proper scoring rules. *Statistical Science*, 38(1), 140–159. \doi{10.1214/22-STS864}.
@@ -1655,19 +1672,33 @@ assess_pp <- function(object,
   if (!is.null(user_split)) {
     data_split <- make_splits_from_user(user_split, iter)
     n_iter <- iter
-    if (plot_fold) {
-      # quick plot of user-defined test sets
-      suppressWarnings({
-        library(ggplot2)
+
+    if (isTRUE(plot_fold)) {
+      if (!requireNamespace("ggplot2", quietly = TRUE)) {
+        warning("plot_fold = TRUE requires the 'ggplot2' package; skipping plots.", call. = FALSE)
+      } else {
         if (n_iter == 1) {
-          print(ggplot(data_split$splits[[1]]$data_test) + geom_sf() + theme_minimal() + ggtitle("Test set"))
+          p <- ggplot2::ggplot(data_split$splits[[1]]$data_test) +
+            ggplot2::geom_sf() +
+            ggplot2::theme_minimal() +
+            ggplot2::ggtitle("Test set")
+          print(p)
         } else {
-          library(gridExtra)
-          plots <- lapply(seq_len(n_iter), function(i)
-            ggplot(data_split$splits[[i]]$data_test) + geom_sf() + theme_minimal() + ggtitle(paste("Test", i)))
-          gridExtra::grid.arrange(grobs = plots, ncol = 2)
+          plots <- lapply(seq_len(n_iter), function(i) {
+            ggplot2::ggplot(data_split$splits[[i]]$data_test) +
+              ggplot2::geom_sf() +
+              ggplot2::theme_minimal() +
+              ggplot2::ggtitle(paste("Test", i))
+          })
+
+          if (requireNamespace("gridExtra", quietly = TRUE)) {
+            do.call(gridExtra::grid.arrange, c(plots, ncol = 2))
+          } else {
+            warning("Optional package 'gridExtra' not installed; printing plots sequentially.", call. = FALSE)
+            for (p in plots) print(p)
+          }
         }
-      })
+      }
     }
   } else if (method == "cluster") {
     data_split <- spatial_clustering_cv(data = data_sf, v = fold, repeats = iter, ...)
@@ -1694,13 +1725,26 @@ assess_pp <- function(object,
       data_split$splits[[i]]$data   <- data_sf[!in_test, ]
     }
     n_iter <- iter
-    if (plot_fold) {
-      suppressWarnings({
-        library(ggplot2); library(gridExtra)
-        plots <- lapply(seq_len(n_iter), function(i)
-          ggplot(data_split$splits[[i]]$data_test) + geom_sf() + theme_minimal() + ggtitle(paste("Subset", i)))
-        if (n_iter > 1) grid.arrange(grobs = plots, ncol = 2) else print(plots[[1]])
-      })
+    if (isTRUE(plot_fold)) {
+      if (!requireNamespace("ggplot2", quietly = TRUE)) {
+        warning("plot_fold = TRUE requires the 'ggplot2' package; skipping plots.", call. = FALSE)
+      } else if (!requireNamespace("sf", quietly = TRUE)) {
+        warning("plot_fold = TRUE with geom_sf() requires the 'sf' package; skipping plots.", call. = FALSE)
+      } else {
+        plots <- lapply(seq_len(n_iter), function(i) {
+          ggplot2::ggplot(data_split$splits[[i]]$data_test) +
+            ggplot2::geom_sf() +
+            ggplot2::theme_minimal() +
+            ggplot2::ggtitle(paste("Subset", i))
+        })
+
+        if (n_iter > 1 && requireNamespace("gridExtra", quietly = TRUE)) {
+          do.call(gridExtra::grid.arrange, c(plots, ncol = 2))
+        } else {
+          # Either only one plot or gridExtra not available: print sequentially
+          for (p in plots) print(p)
+        }
+      }
     }
   }
 
