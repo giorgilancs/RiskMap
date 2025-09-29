@@ -909,6 +909,7 @@ plot.RiskMap_pred_target_grid <- function(x, which_target = "linear_target", whi
 ##' @param include_re Logical indicating whether to include random effects in predictions (default is FALSE).
 ##' @param f_target List of target functions to apply to the linear predictor samples.
 ##' @param pd_summary List of summary functions (e.g., mean, sd) to summarize target samples.
+##' @param return_target_samples Logical indicating whether to return raw samples of the predictive targets for each region (default is FALSE).
 ##'
 ##' @importFrom terra rast as.data.frame
 ##' @export
@@ -918,8 +919,13 @@ plot.RiskMap_pred_target_grid <- function(x, which_target = "linear_target", whi
 ##' manipulation and should be used with 'sf' or 'data.frame' objects representing
 ##' the shapefile.
 ##'
-##' @return An object of class 'RiskMap_pred_target_shp' containing computed targets,
-##' summaries, and associated spatial data.
+##' @return An object of class 'RiskMap_pred_target_shp' containing:
+##' \itemize{
+##'   \item \code{target} – summaries of predictive targets by region.
+##'   \item \code{target_samples} – raw samples of predictive targets (if \code{return_target_samples=TRUE}).
+##'   \item \code{shp} – spatial object with appended summary statistics.
+##'   \item \code{f_target}, \code{pd_summary}, \code{grid_pred}.
+##' }
 ##'
 ##' @author Emanuele Giorgi \email{e.giorgi@@lancaster.ac.uk}
 ##' @author Claudio Fronterre \email{c.fronterr@@lancaster.ac.uk}
@@ -927,27 +933,28 @@ plot.RiskMap_pred_target_grid <- function(x, which_target = "linear_target", whi
 ##' @seealso
 ##' \code{\link{pred_target_grid}}
 ##'
-pred_target_shp <- function(object, shp, shp_target=mean,
-                            weights = NULL,standardize_weights = FALSE,
-                            col_names=NULL,
+pred_target_shp <- function(object, shp, shp_target = mean,
+                            weights = NULL, standardize_weights = FALSE,
+                            col_names = NULL,
                             include_covariates = TRUE,
                             include_nugget = FALSE,
                             include_cov_offset = FALSE,
-                            include_mda_effect=TRUE,
-                            return_shp=TRUE,
+                            include_mda_effect = TRUE,
+                            return_shp = TRUE,
                             time_pred = NULL,
                             mda_grid = NULL,
                             include_re = FALSE,
                             f_target = NULL,
                             pd_summary = NULL,
-                            messages = TRUE) {
-  if(!inherits(object,
-               what = "RiskMap.pred.re", which = FALSE)) {
+                            messages = TRUE,
+                            return_target_samples = FALSE) {
+
+  if(!inherits(object, what = "RiskMap.pred.re", which = FALSE)) {
     stop("The object passed to 'object' must be an output of
          the function 'pred_S'")
   }
 
-  if(object$type!="joint") {
+  if(object$type != "joint") {
     stop("To run predictions with a shape file, joint predictions must be used;
          rerun 'pred_over_grid' and set type='joint'")
   }
@@ -964,10 +971,9 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   }
 
   list_mode <- is.list(object$grid_pred) & !(inherits(object$grid_pred,"sfc") |
-                                             inherits(object$grid_pred,"sf"))
+                                               inherits(object$grid_pred,"sf"))
 
   if (list_mode) {
-    # Basic validation of list contents (sf/sfc POINTs)
     ok_geom <- vapply(
       object$grid_pred,
       function(g) {
@@ -979,10 +985,8 @@ pred_target_shp <- function(object, shp, shp_target=mean,
       stop("When 'object$grid_pred' is a list, each element must be an 'sf' or 'sfc' object.")
     }
 
-    # number of locations per group
     n_pred <- vapply(object$grid_pred, function(g) nrow(sf::st_coordinates(g)), integer(1))
 
-    # weights must be a list with per-group numeric vectors of matching length
     if (!is.null(weights)) {
       if (!is.list(weights)) {
         stop("When 'object$grid_pred' is a list, 'weights' must also be a list, ",
@@ -1006,12 +1010,10 @@ pred_target_shp <- function(object, shp, shp_target=mean,
       }
       no_weights <- FALSE
     } else {
-      # if omitted, create per-group vectors of 1s (keeps downstream logic simple later)
       weights <- lapply(n_pred, function(n) rep(1, n))
       no_weights <- TRUE
     }
 
-    # If DAST and including MDA effect, mda_grid must be a list with rows per location
     if (dast_model && include_mda_effect) {
       if (is.null(mda_grid)) {
         stop("With DAST and include_mda_effect = TRUE, 'mda_grid' must be provided (as a list matching 'object$grid_pred').")
@@ -1032,16 +1034,14 @@ pred_target_shp <- function(object, shp, shp_target=mean,
         }
       }
     }
-  } else{
+  } else {
     n_pred <- nrow(st_coordinates(object$grid_pred))
   }
-
 
   n_re <- length(object$re$samples)
   re_names <- names(object$re$samples)
 
-  if(n_re==0 &&
-     include_re) {
+  if(n_re == 0 && include_re) {
     stop("The categories of the randome effects variables have not been provided;
          re-run pred_over_grid and provide the covariates through the argument 're_predictors'")
   }
@@ -1052,13 +1052,12 @@ pred_target_shp <- function(object, shp, shp_target=mean,
     if(list_mode) {
       weights <- sapply(unlist(n_pred), function(i) rep(1, i))
     } else {
-      weights <- rep(1,n_pred)
+      weights <- rep(1, n_pred)
     }
     no_weights <- TRUE
   }
 
-  if(is.null(object$par_hat$tau2) &
-     include_nugget) {
+  if(is.null(object$par_hat$tau2) & include_nugget) {
     stop("The nugget cannot be included in the predictive target
              because it was not included when fitting the model")
   }
@@ -1079,8 +1078,7 @@ pred_target_shp <- function(object, shp, shp_target=mean,
     n_samples <- ncol(object$S_samples)
   }
 
-  if(!list_mode & (length(object$mu_pred)==1 && object$mu_pred==0 &&
-     include_covariates)) {
+  if(!list_mode & (length(object$mu_pred) == 1 && object$mu_pred == 0 && include_covariates)) {
     stop("Covariates have not been provided; re-run pred_over_grid
          and provide the covariates through the argument 'predictors'")
   }
@@ -1102,7 +1100,7 @@ pred_target_shp <- function(object, shp, shp_target=mean,
       cov_offset <- 0
     }
   } else {
-    if(length(object$cov_offset)==1) {
+    if(length(object$cov_offset) == 1) {
       stop("No covariate offset was included in the model;
            set include_cov_offset = FALSE, or refit the model and include
            the covariate offset")
@@ -1111,15 +1109,15 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   }
 
   if(include_nugget) {
-    Z_sim <- matrix(rnorm(n_samples*n_pred,
-                          sd = sqrt(object$par_hat$tau2)),
+    Z_sim <- matrix(rnorm(n_samples * n_pred, sd = sqrt(object$par_hat$tau2)),
                     ncol = n_samples)
-    object$S_samples <- object$S_samples+Z_sim
+    object$S_samples <- object$S_samples + Z_sim
   }
 
   out <- list()
+  if (return_target_samples) out$target_samples <- list()
+
   if(list_mode) {
-    # Convert vectors to matrices with 1 row (assumes each is length n_samples)
     object$S_samples <- lapply(object$S_samples, function(x) {
       if (is.numeric(x) && is.vector(x)) {
         matrix(x, nrow = 1)
@@ -1130,39 +1128,34 @@ pred_target_shp <- function(object, shp, shp_target=mean,
 
     if(is.matrix(mu_target[[1]])) {
       out$lp_samples <- sapply(1:length(object$grid_pred), function(j)
-                               sapply(1:n_samples,
-                               function(i)
-                                 mu_target[[j]][,i] + cov_offset[[j]] +
-                                 object$S_samples[[j]][,i]))
+        sapply(1:n_samples,
+               function(i)
+                 mu_target[[j]][, i] + cov_offset[[j]] +
+                 object$S_samples[[j]][, i]))
     } else {
       out$lp_samples <- sapply(1:length(object$grid_pred), function(j)
-                               sapply(1:n_samples,
-                                      function(i)
-                                      mu_target[[j]] + cov_offset[[j]] +
-                                      object$S_samples[[j]][,i]))
+        sapply(1:n_samples,
+               function(i)
+                 mu_target[[j]] + cov_offset[[j]] +
+                 object$S_samples[[j]][, i]))
     }
   } else {
     if(is.matrix(mu_target)) {
-      out$lp_samples <- sapply(1:n_samples,
-                               function(i)
-                                 mu_target[,i] + cov_offset +
-                                 object$S_samples[,i])
+      out$lp_samples <- sapply(1:n_samples, function(i)
+        mu_target[, i] + cov_offset + object$S_samples[, i])
     } else {
-      out$lp_samples <- sapply(1:n_samples,
-                               function(i)
-                                 mu_target + cov_offset +
-                                 object$S_samples[,i])
+      out$lp_samples <- sapply(1:n_samples, function(i)
+        mu_target + cov_offset + object$S_samples[, i])
     }
   }
 
   if(include_re) {
     n_dim_re <- sapply(1:n_re, function(i) length(object$re$samples[[i]]))
-
     for(i in 1:n_re) {
       for(j in 1:n_dim_re[i]) {
         for(h in 1:n_samples) {
-          out$lp_samples[,h] <- out$lp_samples[,h] +
-            object$re$D_pred[[i]][,j]*object$re$samples[[i]][[j]][h]
+          out$lp_samples[, h] <- out$lp_samples[, h] +
+            object$re$D_pred[[i]][, j] * object$re$samples[[i]][[j]][h]
         }
       }
     }
@@ -1174,7 +1167,7 @@ pred_target_shp <- function(object, shp, shp_target=mean,
 
   n_reg <- nrow(shp)
   if(is.null(col_names)) {
-    shp$region <- paste("reg",1:n_reg, sep="")
+    shp$region <- paste("reg", 1:n_reg, sep = "")
     col_names <- "region"
     names_reg <- shp$region
   } else {
@@ -1190,6 +1183,7 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   } else {
     shp <- st_transform(shp, crs = st_crs(object$grid_pred)$input)
   }
+
   if(!list_mode) {
     inter <- st_intersects(shp, object$grid_pred)
     if(any(is.na(weights))) {
@@ -1209,9 +1203,9 @@ pred_target_shp <- function(object, shp, shp_target=mean,
   for(h in 1:n_reg) {
 
     if(list_mode) {
-      if(messages) message("Computing predictive target for: ",shp[[col_names]][h])
+      if(messages) message("Computing predictive target for: ", shp[[col_names]][h])
       if(standardize_weights & !no_weights) {
-        weights_h <- weights[[h]]/sum(weights[[h]])
+        weights_h <- weights[[h]] / sum(weights[[h]])
       } else {
         weights_h <- weights[[h]]
       }
@@ -1221,59 +1215,68 @@ pred_target_shp <- function(object, shp, shp_target=mean,
           alpha <- object$par_hat$alpha
           if(is.null(alpha)) alpha <- object$fix_alpha
           gamma <- object$par_hat$gamma
-          mda_effect_time_pred <- compute_mda_effect(rep(time_pred, n_pred[h]),
-                                                     mda_times = object$mda_times,
-                                                     int = mda_grid[[h]], alpha = alpha,
-                                                     gamma = gamma, kappa = object$power_val)
-          target_grid_samples_i <- target_grid_samples_i*mda_effect_time_pred
-
+          mda_effect_time_pred <- compute_mda_effect(
+            rep(time_pred, n_pred[h]),
+            mda_times = object$mda_times,
+            int = mda_grid[[h]],
+            alpha = alpha, gamma = gamma, kappa = object$power_val
+          )
+          target_grid_samples_i <- target_grid_samples_i * mda_effect_time_pred
         }
 
-        target_samples_i <-
-          apply(target_grid_samples_i,
-                2, function(x) shp_target(weights_h*x))
+        target_samples_i <- apply(target_grid_samples_i, 2, function(x) shp_target(weights_h * x))
 
-        out$target[[paste(names_reg[h])]][[paste(names_f[i])]] <- list()
+        if (return_target_samples) {
+          if (is.null(out$target_samples[[ names_reg[h] ]])) out$target_samples[[ names_reg[h] ]] <- list()
+          out$target_samples[[ names_reg[h] ]][[ names_f[i] ]] <- target_samples_i
+        }
+
+        out$target[[ paste(names_reg[h]) ]][[ paste(names_f[i]) ]] <- list()
         for(j in 1:n_summaries) {
-          out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]] <-
+          out$target[[ paste(names_reg[h]) ]][[ paste(names_f[i]) ]][[ paste(names_s[j]) ]] <-
             pd_summary[[j]](target_samples_i)
         }
       }
       if(messages) message(" \n")
+
     } else {
-      if(messages) message("Computing predictive target for:",shp[[col_names]][h])
-      if(length(inter[[h]])==0) {
+      if(messages) message("Computing predictive target for:", shp[[col_names]][h])
+      if(length(inter[[h]]) == 0) {
         warning(paste("No points on the grid fall within", shp[[col_names]][h],
                       "and no predictions are carried out for this area"))
         no_comp <- c(no_comp, h)
       } else {
         ind_grid_h <- inter[[h]]
         if(standardize_weights & !no_weights) {
-          weights_h <- weights[ind_grid_h]/sum(weights[ind_grid_h])
+          weights_h <- weights[ind_grid_h] / sum(weights[ind_grid_h])
         } else {
           weights_h <- weights[ind_grid_h]
         }
         for(i in 1:n_f) {
-          target_grid_samples_i <- as.matrix(f_target[[i]](out$lp_samples[ind_grid_h,]))
+          target_grid_samples_i <- as.matrix(f_target[[i]](out$lp_samples[ind_grid_h, ]))
           if(dast_model && include_mda_effect) {
             alpha <- object$par_hat$alpha
             if(is.null(alpha)) alpha <- object$fix_alpha
             gamma <- object$par_hat$gamma
-            mda_effect_time_pred <- compute_mda_effect(rep(time_pred, length(ind_grid_h)),
-                                                       mda_times = object$mda_times,
-                                                       mda_grid[ind_grid_h,], alpha = alpha,
-                                                       gamma = gamma, kappa = object$power_val)
-            target_grid_samples_i <- target_grid_samples_i*mda_effect_time_pred
-
+            mda_effect_time_pred <- compute_mda_effect(
+              rep(time_pred, length(ind_grid_h)),
+              mda_times = object$mda_times,
+              int = mda_grid[ind_grid_h, ],
+              alpha = alpha, gamma = gamma, kappa = object$power_val
+            )
+            target_grid_samples_i <- target_grid_samples_i * mda_effect_time_pred
           }
 
-          target_samples_i <-
-            apply(target_grid_samples_i,
-                  2, function(x) shp_target(weights_h*x))
+          target_samples_i <- apply(target_grid_samples_i, 2, function(x) shp_target(weights_h * x))
 
-          out$target[[paste(names_reg[h])]][[paste(names_f[i])]] <- list()
+          if (return_target_samples) {
+            if (is.null(out$target_samples[[ names_reg[h] ]])) out$target_samples[[ names_reg[h] ]] <- list()
+            out$target_samples[[ names_reg[h] ]][[ names_f[i] ]] <- target_samples_i
+          }
+
+          out$target[[ paste(names_reg[h]) ]][[ paste(names_f[i]) ]] <- list()
           for(j in 1:n_summaries) {
-            out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]] <-
+            out$target[[ paste(names_reg[h]) ]][[ paste(names_f[i]) ]][[ paste(names_s[j]) ]] <-
               pd_summary[[j]](target_samples_i)
           }
         }
@@ -1290,16 +1293,17 @@ pred_target_shp <- function(object, shp, shp_target=mean,
     }
     for(i in 1:n_f) {
       for(j in 1:n_summaries) {
-        name_ij <- paste(names_f[i],"_",paste(names_s[j]),sep="")
+        name_ij <- paste(names_f[i], "_", paste(names_s[j]), sep = "")
         shp[[name_ij]] <- rep(NA, n_reg)
         for(h in ind_reg) {
-          which_reg <- which(shp[[col_names]]==names_reg[h])
-          shp[which_reg,][[name_ij]] <-
-            out$target[[paste(names_reg[h])]][[paste(names_f[i])]][[paste(names_s[j])]]
+          which_reg <- which(shp[[col_names]] == names_reg[h])
+          shp[which_reg, ][[name_ij]] <-
+            out$target[[ paste(names_reg[h]) ]][[ paste(names_f[i]) ]][[ paste(names_s[j]) ]]
         }
       }
     }
   }
+
   out$shp <- shp
   out$f_target <- names(f_target)
   out$pd_summary <- names(pd_summary)
